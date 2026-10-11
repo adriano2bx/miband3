@@ -51,7 +51,9 @@ O código fica em `app/src/main/java/com/miband3/app/ble/`:
 
 - `MiBandUuids.kt`: serviços e características GATT (`FEE0`/`FEE1` da Huami + serviços BLE padrão).
 - `MiBandProtocol.kt`: monta e interpreta os pacotes. É código puro, coberto por testes JVM.
-  - **Autenticação** (característica `0009`): `01 08 <chave>` grava a chave, `02 08` pede um número aleatório, `03 08 <AES-ECB(aleatório)>` responde ao desafio. As respostas chegam como `10 xx 01`.
+  - **UUIDs**: as características próprias da Xiaomi/Huami usam a base `0000xxxx-0000-3512-2118-0009af100700`.
+  - **Autenticação** (característica `0009`): `01 00 <chave>` grava a chave, `02 00` pede um número aleatório, `03 00 <AES-ECB(aleatório)>` responde ao desafio. As respostas chegam como `10 xx 01`. A flag é `00` na Mi Band 3; o `08` do Amazfit Bip faz a pulseira aceitar a chave mas continuar na tela de pareamento.
+  - **Perfil** (característica `0008`): nascimento, sexo, altura, peso, pulso e meta de passos, enviados logo após autenticar.
   - **Mensagens**: *New Alert* (`2A46`) com categoria (SMS `05`, chamada `03`, e-mail `01`, app customizado `FA` + ícone) e o texto `título\0corpo` em UTF-8.
   - **Vibrar**: *Alert Level* (`2A06`).
   - **Frequência cardíaca**: controle `2A39` (`15 02 01` manual, `15 01 01` contínuo + ping `16` a cada 12 s), leitura em `2A37`.
