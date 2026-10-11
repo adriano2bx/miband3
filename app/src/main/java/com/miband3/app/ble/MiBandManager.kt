@@ -58,6 +58,8 @@ data class BandState(
     val serial: String? = null,
     val awaitingTap: Boolean = false,
     val findingPhone: Boolean = false,
+    /** Motivo da última falha de conexão, com dica de como resolver. */
+    val lastError: String? = null,
 )
 
 data class ScannedDevice(val address: String, val name: String?, val rssi: Int) {
@@ -96,6 +98,8 @@ object MiBandManager {
     private const val KEY_NAME = "name"
     private const val SCAN_DURATION_MS = 15_000L
     private const val RECONNECT_DELAY_MS = 5_000L
+    private const val DISCOVERY_TIMEOUT_MS = 15_000L
+    private const val MAX_FAILED_ATTEMPTS = 4
     private const val HR_PING_INTERVAL_MS = 12_000L
     private const val MAX_LOG = 200
     const val ALARM_SLOTS = 3
@@ -126,6 +130,9 @@ object MiBandManager {
     private var gatt: BluetoothGatt? = null
     private var userWantsConnection = false
     private var triedSendingKey = false
+
+    /** Tentativas seguidas que caíram antes de a pulseira ficar pronta. */
+    private var failedAttempts = 0
     private var ringtone: Ringtone? = null
 
     private val bluetoothAdapter: BluetoothAdapter?
@@ -205,6 +212,8 @@ object MiBandManager {
             prefs.edit().putString(KEY_ADDRESS, address).putString(KEY_NAME, name).apply()
         }
         userWantsConnection = true
+        failedAttempts = 0
+        _state.update { it.copy(lastError = null) }
         MiBandService.start(appContext)
         handler.post { connectInternal(address) }
     }
@@ -231,9 +240,59 @@ object MiBandManager {
                 name = prefs.getString(KEY_NAME, null) ?: device.name,
             )
         }
-        log("Conectando a $address…", fromBand = false)
+        val attempt = if (failedAttempts > 0) " (tentativa ${failedAttempts + 1} de $MAX_FAILED_ATTEMPTS)" else ""
+        log("Conectando a $address…$attempt", fromBand = false)
         gatt = device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         gattQueue.gatt = gatt
+    }
+
+    private fun isBondedInAndroid(): Boolean {
+        val address = _state.value.address ?: return false
+        return try {
+            bluetoothAdapter?.getRemoteDevice(address)?.bondState == BluetoothDevice.BOND_BONDED
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Limpa o cache de serviços GATT do Android (API oculta, usada por várias bibliotecas BLE).
+     * Ajuda quando o cache ficou inconsistente depois de um reset da pulseira.
+     */
+    private fun refreshGattCache(g: BluetoothGatt) {
+        try {
+            g.javaClass.getMethod("refresh").invoke(g)
+        } catch (e: Exception) {
+            Log.w(TAG, "refresh() indisponível", e)
+        }
+    }
+
+    private val discoveryTimeout = Runnable {
+        log("A pulseira não respondeu à descoberta de serviços", fromBand = false)
+        gatt?.let {
+            refreshGattCache(it)
+            it.disconnect()
+        }
+    }
+
+    private fun explainStatus(status: Int, bonded: Boolean): String {
+        val reason = when (status) {
+            8 -> "Tempo esgotado: a pulseira parou de responder (distância ou interferência)."
+            19 -> "A pulseira encerrou a conexão. Normalmente isso acontece quando ela ainda está " +
+                "vinculada ao Mi Fit / Zepp Life (neste ou em outro celular) ou quando outro app está conectado a ela."
+            5, 15, 22, 137 -> "Falha de segurança no link Bluetooth: o celular e a pulseira não concordam sobre o pareamento."
+            62, 133, 257 -> "Erro genérico do Bluetooth do Android ao falar com a pulseira."
+            else -> "Conexão perdida (código $status)."
+        }
+        val tips = buildList {
+            if (bonded) {
+                add("Este celular tem um pareamento Bluetooth antigo com a pulseira: abra as configurações de Bluetooth, " +
+                    "toque na engrenagem da Mi Band 3 e escolha \"Desparear\" / \"Esquecer\".")
+            }
+            add("Feche (forçar parada) o Zepp Life / Mi Fit e desligue o Bluetooth de outros celulares que já usaram a pulseira.")
+            add("Se nada resolver, reinicie a pulseira de fábrica (Mais > Configurações > Restaurar) e pareie de novo.")
+        }
+        return reason + "\n\n" + tips.joinToString("\n") { "• $it" }
     }
 
     fun disconnect() {
@@ -288,10 +347,21 @@ object MiBandManager {
                 when (newState) {
                     BluetoothProfile.STATE_CONNECTED -> {
                         _state.update { it.copy(connection = ConnectionState.DISCOVERING) }
-                        // Pequena espera melhora a estabilidade em vários aparelhos.
-                        handler.postDelayed({ if (g == gatt) g.discoverServices() }, 600)
+                        g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                        // Com pareamento no Android, a criptografia do link precisa terminar
+                        // antes da descoberta; sem ele, uma pequena espera já ajuda.
+                        val delay = if (isBondedInAndroid()) 1_600L else 600L
+                        if (failedAttempts >= 2) refreshGattCache(g)
+                        handler.postDelayed({
+                            if (g == gatt) {
+                                if (!g.discoverServices()) log("Não foi possível iniciar a descoberta de serviços", fromBand = false)
+                                handler.postDelayed(discoveryTimeout, DISCOVERY_TIMEOUT_MS)
+                            }
+                        }, delay)
                     }
                     BluetoothProfile.STATE_DISCONNECTED -> {
+                        handler.removeCallbacks(discoveryTimeout)
+                        val wasReady = _state.value.connection == ConnectionState.READY
                         stopHeartRatePing()
                         closeGatt()
                         _state.update {
@@ -302,8 +372,20 @@ object MiBandManager {
                                 awaitingTap = false,
                             )
                         }
-                        log("Conexão perdida (status $status)", fromBand = false)
-                        if (userWantsConnection) {
+                        log("Conexão perdida (código $status)", fromBand = false)
+                        if (!userWantsConnection) return@post
+                        if (wasReady) {
+                            failedAttempts = 0
+                        } else {
+                            failedAttempts++
+                        }
+                        if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+                            val explanation = explainStatus(status, isBondedInAndroid())
+                            log("Não foi possível conectar após $MAX_FAILED_ATTEMPTS tentativas. $explanation", fromBand = false)
+                            userWantsConnection = false
+                            _state.update { it.copy(lastError = explanation) }
+                            MiBandService.stop(appContext)
+                        } else {
                             log("Tentando reconectar em ${RECONNECT_DELAY_MS / 1000}s…", fromBand = false)
                             handler.postDelayed(reconnectRunnable, RECONNECT_DELAY_MS)
                         }
@@ -315,11 +397,14 @@ object MiBandManager {
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             handler.post {
                 if (g != gatt) return@post
-                if (status != BluetoothGatt.GATT_SUCCESS) {
-                    log("Falha ao descobrir serviços ($status)", fromBand = false)
+                handler.removeCallbacks(discoveryTimeout)
+                if (status != BluetoothGatt.GATT_SUCCESS || g.services.isNullOrEmpty()) {
+                    log("Falha ao descobrir serviços (código $status)", fromBand = false)
+                    refreshGattCache(g)
                     g.disconnect()
                     return@post
                 }
+                log("${g.services.size} serviços encontrados", fromBand = false)
                 startAuthentication()
             }
         }
@@ -448,7 +533,8 @@ object MiBandManager {
     }
 
     private fun onAuthenticated() {
-        _state.update { it.copy(connection = ConnectionState.READY, awaitingTap = false) }
+        failedAttempts = 0
+        _state.update { it.copy(connection = ConnectionState.READY, awaitingTap = false, lastError = null) }
         log("Autenticado! Pulseira pronta.", fromBand = true)
         val q = gattQueue
         listOf(

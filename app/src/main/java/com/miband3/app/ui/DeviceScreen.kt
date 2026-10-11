@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -161,6 +162,10 @@ private fun Dashboard(state: BandState) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        val error = state.lastError
+        if (error != null && state.connection == ConnectionState.DISCONNECTED) {
+            ConnectionErrorCard(error)
+        }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Conexão", style = MaterialTheme.typography.titleMedium)
@@ -256,6 +261,28 @@ private fun Dashboard(state: BandState) {
                     state.hardware?.let { Text("Hardware: $it") }
                     state.serial?.let { Text("Série: $it") }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionErrorCard(message: String) {
+    val context = LocalContext.current
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Não foi possível conectar", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                }) { Text("Abrir Bluetooth") }
+                Button(onClick = { MiBandManager.connectSaved() }) { Text("Tentar novamente") }
             }
         }
     }
