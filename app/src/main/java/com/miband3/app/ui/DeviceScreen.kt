@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.miband3.app.BuildConfig
 import com.miband3.app.ble.AlarmConfig
 import com.miband3.app.ble.BandState
 import com.miband3.app.ble.ConnectionState
@@ -479,27 +480,29 @@ private fun SettingsTab(state: BandState) {
             }
         }
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Notifications, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Notificações do celular", style = MaterialTheme.typography.titleMedium)
-                }
-                SettingSwitch("Encaminhar notificações para a pulseira", settings.forwardNotifications) {
-                    MiBandManager.setForwardNotifications(it)
-                }
-                if (!listenerEnabled) {
-                    Text(
-                        "Para encaminhar notificações (WhatsApp, Telegram, chamadas...) é preciso liberar o acesso às notificações.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    FilledTonalButton(onClick = {
-                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    }) { Text("Liberar acesso às notificações") }
-                } else {
-                    Text("Acesso às notificações liberado.", style = MaterialTheme.typography.bodySmall)
+        if (BuildConfig.NOTIFICATION_FORWARDING) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Notifications, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Notificações do celular", style = MaterialTheme.typography.titleMedium)
+                    }
+                    SettingSwitch("Encaminhar notificações para a pulseira", settings.forwardNotifications) {
+                        MiBandManager.setForwardNotifications(it)
+                    }
+                    if (!listenerEnabled) {
+                        Text(
+                            "Para encaminhar notificações (WhatsApp, Telegram, chamadas...) é preciso liberar o acesso às notificações.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        FilledTonalButton(onClick = {
+                            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        }) { Text("Liberar acesso às notificações") }
+                    } else {
+                        Text("Acesso às notificações liberado.", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }

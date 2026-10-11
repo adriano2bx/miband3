@@ -31,6 +31,24 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    // "padrao" não declara o leitor de notificações, que faz o Play Protect
+    // bloquear a instalação de APKs baixados fora da loja em alguns países.
+    // "completo" inclui o encaminhamento de notificações para a pulseira.
+    flavorDimensions += "edicao"
+    productFlavors {
+        create("padrao") {
+            dimension = "edicao"
+            buildConfigField("boolean", "NOTIFICATION_FORWARDING", "false")
+        }
+        create("completo") {
+            dimension = "edicao"
+            applicationIdSuffix = ".completo"
+            versionNameSuffix = "-completo"
+            buildConfigField("boolean", "NOTIFICATION_FORWARDING", "true")
+        }
     }
 }
 

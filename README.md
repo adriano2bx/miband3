@@ -21,11 +21,18 @@ Um serviço em primeiro plano mantém a conexão ativa com o app em segundo plan
 - Android 8.0 (API 26) ou superior, com Bluetooth LE.
 - Android Studio Ladybug ou mais recente (AGP 8.7, Kotlin 2.0, JDK 17).
 
+## Versões do APK
+
+| APK | Para quem |
+| --- | --- |
+| `app-padrao-debug.apk` | Todas as funções, **exceto** encaminhar as notificações do celular. O Play Protect deixa instalar normalmente. |
+| `app-completo-debug.apk` | Inclui o encaminhamento de notificações. O Play Protect pode **bloquear** a instalação de APKs baixados fora da loja que leem notificações (proteção contra fraude ativa no Brasil). Instale via `adb install` pelo computador. |
+
 ## Como compilar
 
 ```bash
-./gradlew assembleDebug          # gera app/build/outputs/apk/debug/app-debug.apk
-./gradlew testDebugUnitTest      # testes do protocolo
+./gradlew assembleDebug             # gera app/build/outputs/apk/{padrao,completo}/debug/*.apk
+./gradlew testPadraoDebugUnitTest   # testes do protocolo
 ```
 
 Ou abra a pasta no Android Studio e clique em *Run*. O workflow do GitHub Actions (`.github/workflows/android.yml`) também gera o APK a cada push e o publica como artefato `miband3-debug-apk`.
