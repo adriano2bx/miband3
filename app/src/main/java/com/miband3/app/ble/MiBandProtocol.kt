@@ -218,6 +218,52 @@ object MiBandProtocol {
 
     fun distanceMetric(): ByteArray = byteArrayOf(0x06, 0x03, 0x00, 0x00)
 
+    object Gender {
+        const val MALE = 0
+        const val FEMALE = 1
+        const val OTHER = 2
+    }
+
+    /**
+     * Perfil do usuário (característica 0008). Uma pulseira recém-pareada fica na tela
+     * "conecte um dispositivo" até recebê-lo; também é usado no cálculo de calorias e distância.
+     */
+    fun userInfo(
+        birthYear: Int,
+        birthMonth: Int,
+        birthDay: Int,
+        gender: Int,
+        heightCm: Int,
+        weightKg: Int,
+        userId: Int,
+    ): ByteArray {
+        val weight = weightKg * 200
+        return byteArrayOf(
+            0x4f, 0x00, 0x00,
+            (birthYear and 0xff).toByte(),
+            ((birthYear shr 8) and 0xff).toByte(),
+            birthMonth.toByte(),
+            birthDay.toByte(),
+            gender.toByte(),
+            (heightCm and 0xff).toByte(),
+            ((heightCm shr 8) and 0xff).toByte(),
+            (weight and 0xff).toByte(),
+            ((weight shr 8) and 0xff).toByte(),
+            (userId and 0xff).toByte(),
+            ((userId shr 8) and 0xff).toByte(),
+            ((userId shr 16) and 0xff).toByte(),
+            ((userId shr 24) and 0xff).toByte(),
+        )
+    }
+
+    /** Pulso em que a pulseira é usada (característica 0008). */
+    fun wearLocation(leftWrist: Boolean): ByteArray =
+        byteArrayOf(0x20, 0x00, 0x00, if (leftWrist) 0x02 else 0x82.toByte())
+
+    /** Meta diária de passos (característica 0008). */
+    fun stepGoal(steps: Int): ByteArray =
+        byteArrayOf(0x10, 0x00, 0x00, (steps and 0xff).toByte(), ((steps shr 8) and 0xff).toByte(), 0x00, 0x00)
+
     /** Bits dos dias da semana usados nos alarmes. */
     object Days {
         const val MONDAY = 0x01

@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -72,6 +73,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -83,6 +85,8 @@ import com.miband3.app.ble.ConnectionState
 import com.miband3.app.ble.LogEntry
 import com.miband3.app.ble.MessageType
 import com.miband3.app.ble.MiBandManager
+import com.miband3.app.ble.MiBandProtocol.Gender
+import com.miband3.app.ble.UserProfile
 import com.miband3.app.ble.MiBandProtocol.Days
 import com.miband3.app.service.NotificationForwarder
 import java.text.SimpleDateFormat
@@ -505,6 +509,8 @@ private fun SettingsTab(state: BandState) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        ProfileCard(settings.profile, ready)
+
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
                 Text("Pulseira", style = MaterialTheme.typography.titleMedium)
@@ -567,6 +573,73 @@ private fun SettingsTab(state: BandState) {
             title = { Text("Esquecer pulseira?") },
             text = { Text("Você precisará parear novamente tocando na tela da pulseira.") },
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ProfileCard(profile: UserProfile, ready: Boolean) {
+    var birthYear by remember(profile) { mutableStateOf(profile.birthYear.toString()) }
+    var height by remember(profile) { mutableStateOf(profile.heightCm.toString()) }
+    var weight by remember(profile) { mutableStateOf(profile.weightKg.toString()) }
+    var goal by remember(profile) { mutableStateOf(profile.stepGoal.toString()) }
+    var gender by remember(profile) { mutableIntStateOf(profile.gender) }
+    var leftWrist by remember(profile) { mutableStateOf(profile.leftWrist) }
+
+    val edited = UserProfile(
+        birthYear = birthYear.toIntOrNull()?.coerceIn(1900, 2100) ?: profile.birthYear,
+        gender = gender,
+        heightCm = height.toIntOrNull()?.coerceIn(50, 250) ?: profile.heightCm,
+        weightKg = weight.toIntOrNull()?.coerceIn(20, 300) ?: profile.weightKg,
+        leftWrist = leftWrist,
+        stepGoal = goal.toIntOrNull()?.coerceIn(100, 60000) ?: profile.stepGoal,
+    )
+    val numbers = KeyboardOptions(keyboardType = KeyboardType.Number)
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Perfil", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Usado pela pulseira para calcular calorias e distância. Enviá-lo também tira a pulseira da tela de pareamento.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    birthYear, { birthYear = it.filter(Char::isDigit).take(4) },
+                    label = { Text("Ano nasc.") }, singleLine = true, keyboardOptions = numbers,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    goal, { goal = it.filter(Char::isDigit).take(5) },
+                    label = { Text("Meta de passos") }, singleLine = true, keyboardOptions = numbers,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    height, { height = it.filter(Char::isDigit).take(3) },
+                    label = { Text("Altura (cm)") }, singleLine = true, keyboardOptions = numbers,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    weight, { weight = it.filter(Char::isDigit).take(3) },
+                    label = { Text("Peso (kg)") }, singleLine = true, keyboardOptions = numbers,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(gender == Gender.MALE, { gender = Gender.MALE }, label = { Text("Masculino") })
+                FilterChip(gender == Gender.FEMALE, { gender = Gender.FEMALE }, label = { Text("Feminino") })
+                FilterChip(gender == Gender.OTHER, { gender = Gender.OTHER }, label = { Text("Outro") })
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(leftWrist, { leftWrist = true }, label = { Text("Pulso esquerdo") })
+                FilterChip(!leftWrist, { leftWrist = false }, label = { Text("Pulso direito") })
+            }
+            Button(onClick = { MiBandManager.saveProfile(edited) }, enabled = edited != profile || ready) {
+                Text(if (ready) "Salvar e enviar à pulseira" else "Salvar")
+            }
+        }
     }
 }
 

@@ -18,6 +18,9 @@ object MiBandUuids {
     val CHAR_BATTERY: UUID = huami("0006")
     val CHAR_STEPS: UUID = huami("0007")
 
+    /** Perfil do usuário, pulso e meta de passos. */
+    val CHAR_USER_SETTINGS: UUID = huami("0008")
+
     /** Eventos gerados pela pulseira (botão, procurar celular, chamada rejeitada...). */
     val CHAR_DEVICE_EVENT: UUID = huami("0010")
 

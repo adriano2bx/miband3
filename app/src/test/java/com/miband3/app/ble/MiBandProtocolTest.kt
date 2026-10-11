@@ -132,4 +132,16 @@ class MiBandProtocolTest {
         assertEquals("00000009-0000-3512-2118-0009af100700", MiBandUuids.CHAR_AUTH.toString())
         assertEquals("00000010-0000-3512-2118-0009af100700", MiBandUuids.CHAR_DEVICE_EVENT.toString())
     }
+
+    @Test
+    fun buildsUserInfo() {
+        val p = MiBandProtocol.userInfo(1990, 1, 1, MiBandProtocol.Gender.MALE, 175, 80, 0x01020304)
+        assertEquals(16, p.size)
+        assertEquals(0x4f.toByte(), p[0])
+        assertEquals(1990, (p[3].toInt() and 0xff) or ((p[4].toInt() and 0xff) shl 8))
+        assertEquals(175, p[8].toInt() and 0xff)
+        assertEquals(80 * 200, (p[10].toInt() and 0xff) or ((p[11].toInt() and 0xff) shl 8))
+        assertArrayEquals(byteArrayOf(4, 3, 2, 1), p.copyOfRange(12, 16))
+        assertArrayEquals(byteArrayOf(0x10, 0, 0, 0x40, 0x1f, 0, 0), MiBandProtocol.stepGoal(8000))
+    }
 }

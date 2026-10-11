@@ -77,6 +77,16 @@ data class BandSettings(
     val time24h: Boolean = true,
     val liftWrist: Boolean = true,
     val forwardNotifications: Boolean = false,
+    val profile: UserProfile = UserProfile(),
+)
+
+data class UserProfile(
+    val birthYear: Int = 1990,
+    val gender: Int = MiBandProtocol.Gender.MALE,
+    val heightCm: Int = 170,
+    val weightKg: Int = 70,
+    val leftWrist: Boolean = true,
+    val stepGoal: Int = 8000,
 )
 
 data class AlarmConfig(
@@ -160,6 +170,14 @@ object MiBandManager {
             time24h = prefs.getBoolean("time24h", true),
             liftWrist = prefs.getBoolean("liftWrist", true),
             forwardNotifications = prefs.getBoolean("forwardNotifications", false),
+            profile = UserProfile(
+                birthYear = prefs.getInt("birthYear", 1990),
+                gender = prefs.getInt("gender", MiBandProtocol.Gender.MALE),
+                heightCm = prefs.getInt("heightCm", 170),
+                weightKg = prefs.getInt("weightKg", 70),
+                leftWrist = prefs.getBoolean("leftWrist", true),
+                stepGoal = prefs.getInt("stepGoal", 8000),
+            ),
         )
         _alarms.value = (0 until ALARM_SLOTS).map { loadAlarm(it) }
         registerBondReceiver()
@@ -784,8 +802,32 @@ object MiBandManager {
         log("Data e hora sincronizadas", fromBand = false)
     }
 
+    private fun userId(): Int {
+        if (!prefs.contains("userId")) prefs.edit().putInt("userId", SecureRandom().nextInt(Int.MAX_VALUE)).apply()
+        return prefs.getInt("userId", 1)
+    }
+
+    private fun sendProfile(p: UserProfile) {
+        write(
+            MiBandUuids.CHAR_USER_SETTINGS,
+            MiBandProtocol.userInfo(p.birthYear, 1, 1, p.gender, p.heightCm, p.weightKg, userId()),
+        )
+        write(MiBandUuids.CHAR_USER_SETTINGS, MiBandProtocol.wearLocation(p.leftWrist))
+        write(MiBandUuids.CHAR_USER_SETTINGS, MiBandProtocol.stepGoal(p.stepGoal))
+    }
+
+    fun saveProfile(profile: UserProfile) {
+        updateSettings { it.copy(profile = profile) }
+        if (isReady) {
+            sendProfile(profile)
+            log("Perfil enviado para a pulseira", fromBand = false)
+        }
+    }
+
     private fun applySettings() {
         val s = _settings.value
+        // O perfil precisa vir primeiro: é ele que tira a pulseira da tela de pareamento.
+        sendProfile(s.profile)
         write(MiBandUuids.CHAR_CONFIG, MiBandProtocol.timeFormat24h(s.time24h))
         write(MiBandUuids.CHAR_CONFIG, MiBandProtocol.liftWristToActivate(s.liftWrist))
         write(MiBandUuids.CHAR_CONFIG, MiBandProtocol.distanceMetric())
@@ -812,6 +854,12 @@ object MiBandManager {
             .putBoolean("time24h", s.time24h)
             .putBoolean("liftWrist", s.liftWrist)
             .putBoolean("forwardNotifications", s.forwardNotifications)
+            .putInt("birthYear", s.profile.birthYear)
+            .putInt("gender", s.profile.gender)
+            .putInt("heightCm", s.profile.heightCm)
+            .putInt("weightKg", s.profile.weightKg)
+            .putBoolean("leftWrist", s.profile.leftWrist)
+            .putInt("stepGoal", s.profile.stepGoal)
             .apply()
     }
 
