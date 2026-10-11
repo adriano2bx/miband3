@@ -517,8 +517,17 @@ object MiBandManager {
     private fun startAuthentication() {
         _state.update { it.copy(connection = ConnectionState.AUTHENTICATING) }
         if (gattQueue.findCharacteristic(MiBandUuids.CHAR_AUTH) == null) {
-            log("Este dispositivo não parece ser uma Mi Band 3 (sem serviço de autenticação)", fromBand = false)
+            val services = describeServices()
+            log("Sem característica de autenticação da Mi Band. Serviços encontrados:\n$services", fromBand = false)
+            val message = "O dispositivo conectado não tem o serviço de autenticação da Xiaomi/Huami, " +
+                "então não é uma Mi Band 3 original. Pode ser outro aparelho da lista ou uma réplica " +
+                "(\"M3\", \"Smart Band\" — usadas com apps como FitPro, Lefun ou Yoho), que usam outro protocolo.\n\n" +
+                "Serviços encontrados:\n$services"
+            // Não adianta tentar de novo: o aparelho simplesmente não fala esse protocolo.
+            userWantsConnection = false
+            _state.update { it.copy(lastError = message) }
             gatt?.disconnect()
+            MiBandService.stop(appContext)
             return
         }
         gattQueue.enqueue(GattQueue.Op.Notify(MiBandUuids.CHAR_AUTH))
@@ -527,6 +536,17 @@ object MiBandManager {
             gattQueue.enqueue(GattQueue.Op.Write(MiBandUuids.CHAR_AUTH, MiBandProtocol.authRequestRandom(), noResponse = true))
         } else {
             sendAuthKey()
+        }
+    }
+
+    /** Lista serviços e características (UUIDs curtos quando possível) para diagnóstico. */
+    private fun describeServices(): String {
+        fun short(uuid: UUID): String {
+            val text = uuid.toString()
+            return if (text.endsWith("-0000-1000-8000-00805f9b34fb") && text.startsWith("0000")) text.substring(4, 8) else text
+        }
+        return gatt?.services.orEmpty().joinToString("\n") { service ->
+            "• ${short(service.uuid)}: " + service.characteristics.joinToString(", ") { short(it.uuid) }
         }
     }
 
