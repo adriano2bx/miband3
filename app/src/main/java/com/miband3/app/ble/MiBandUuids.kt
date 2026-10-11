@@ -5,7 +5,7 @@ import java.util.UUID
 /** UUIDs de serviços e características usados pela Mi Band 3 (protocolo Huami). */
 object MiBandUuids {
     private fun std(short: String): UUID = UUID.fromString("0000$short-0000-1000-8000-00805f9b34fb")
-    private fun huami(short: String): UUID = UUID.fromString("0000$short-0000-3512-2155-6e6f69746365")
+    private fun huami(short: String): UUID = UUID.fromString("0000$short-0000-3512-2118-0009af100700")
 
     val SERVICE_MIBAND: UUID = std("fee0")
     val SERVICE_AUTH: UUID = std("fee1")
@@ -33,7 +33,8 @@ object MiBandUuids {
     val CHAR_NEW_ALERT: UUID = std("2a46")
 
     val CHAR_SERIAL: UUID = std("2a25")
-    val CHAR_FIRMWARE: UUID = std("2a26")
+    /** Software Revision: a Mi Band 3 informa a versão do firmware aqui. */
+    val CHAR_FIRMWARE: UUID = std("2a28")
     val CHAR_HARDWARE: UUID = std("2a27")
 
     /** Client Characteristic Configuration Descriptor. */

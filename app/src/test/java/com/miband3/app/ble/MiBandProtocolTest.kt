@@ -125,4 +125,11 @@ class MiBandProtocolTest {
         assertEquals(MiBandProtocol.DeviceEvent.FIND_PHONE_START, MiBandProtocol.DeviceEvent.fromData(byteArrayOf(0x08)))
         assertNull(MiBandProtocol.DeviceEvent.fromData(byteArrayOf(0x55)))
     }
+
+    @Test
+    fun usesHuamiUuidBase() {
+        // Conferido numa Mi Band 3 real (lista de serviços GATT).
+        assertEquals("00000009-0000-3512-2118-0009af100700", MiBandUuids.CHAR_AUTH.toString())
+        assertEquals("00000010-0000-3512-2118-0009af100700", MiBandUuids.CHAR_DEVICE_EVENT.toString())
+    }
 }
