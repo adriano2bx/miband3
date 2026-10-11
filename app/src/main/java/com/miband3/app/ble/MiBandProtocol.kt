@@ -14,8 +14,8 @@ object MiBandProtocol {
 
     // ---------------------------------------------------------------- autenticação
 
-    /** Flag usada pela Mi Band 3 / Amazfit Bip nos comandos de autenticação. */
-    private const val AUTH_FLAGS: Byte = 0x08
+    /** Flag de autenticação da Mi Band 3 (o Amazfit Bip usa 0x08; a Mi Band 3 usa 0x00, como no Gadgetbridge). */
+    private const val AUTH_FLAGS: Byte = 0x00
 
     private const val AUTH_RESPONSE: Byte = 0x10
     private const val AUTH_SEND_KEY: Byte = 0x01
@@ -214,7 +214,8 @@ object MiBandProtocol {
 
     fun timeFormat24h(enabled: Boolean): ByteArray = byteArrayOf(0x06, 0x02, 0x00, if (enabled) 0x01 else 0x00)
 
-    fun liftWristToActivate(enabled: Boolean): ByteArray = byteArrayOf(0x06, 0x05, 0x00, if (enabled) 0x01 else 0x00)
+    fun liftWristToActivate(enabled: Boolean): ByteArray =
+        if (enabled) byteArrayOf(0x06, 0x05, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00) else byteArrayOf(0x06, 0x05, 0x00, 0x00)
 
     fun distanceMetric(): ByteArray = byteArrayOf(0x06, 0x03, 0x00, 0x00)
 

@@ -19,7 +19,7 @@ class MiBandProtocolTest {
         val packet = MiBandProtocol.authSendKey(key)
         assertEquals(18, packet.size)
         assertEquals(0x01.toByte(), packet[0])
-        assertEquals(0x08.toByte(), packet[1])
+        assertEquals(0x00.toByte(), packet[1])
         assertArrayEquals(key, packet.copyOfRange(2, 18))
     }
 
@@ -30,7 +30,7 @@ class MiBandProtocolTest {
         val plain = MiBandProtocol.hexToBytes("00112233445566778899aabbccddeeff")
         val packet = MiBandProtocol.authSendEncrypted(plain, fipsKey)
         assertEquals(0x03.toByte(), packet[0])
-        assertEquals(0x08.toByte(), packet[1])
+        assertEquals(0x00.toByte(), packet[1])
         assertArrayEquals(MiBandProtocol.hexToBytes("69c4e0d86a7b0430d8cdb78070b4c55a"), packet.copyOfRange(2, 18))
     }
 

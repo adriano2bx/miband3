@@ -516,7 +516,8 @@ object MiBandManager {
 
     // =================================================================== autenticação
 
-    private fun authorizedKey(address: String) = "authorized_$address"
+    // "v2": pareamentos feitos com a flag errada (0x08) são refeitos uma vez com a flag correta.
+    private fun authorizedKey(address: String) = "authorized_v2_$address"
 
     private fun authKey(): ByteArray {
         prefs.getString(KEY_AUTH, null)?.let { return MiBandProtocol.hexToBytes(it) }
