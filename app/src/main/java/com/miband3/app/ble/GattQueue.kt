@@ -73,6 +73,7 @@ internal class GattQueue(
         if (started) {
             handler.postDelayed(timeout, TIMEOUT_MS)
         } else {
+            if (op !is Op.Action) onError("Não foi possível iniciar ${describe(op)}")
             current = null
             handler.post { next() }
         }
@@ -125,6 +126,13 @@ internal class GattQueue(
                 }
             }
         }
+    }
+
+    private fun describe(op: Op): String = when (op) {
+        is Op.Read -> "leitura de ${op.uuid}"
+        is Op.Write -> "escrita em ${op.uuid}"
+        is Op.Notify -> "notificações de ${op.uuid}"
+        is Op.Action -> "ação"
     }
 
     private fun missing(uuid: UUID): Boolean {

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -328,6 +329,15 @@ private fun Chat(state: BandState) {
     Column(Modifier.fillMaxSize().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Histórico com a pulseira", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            val context = LocalContext.current
+            IconButton(onClick = {
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, MiBandManager.logAsText())
+                context.startActivity(Intent.createChooser(send, "Compartilhar histórico"))
+            }) {
+                Icon(Icons.Filled.Share, contentDescription = "Compartilhar histórico")
+            }
             IconButton(onClick = { MiBandManager.clearLog() }) {
                 Icon(Icons.Filled.Delete, contentDescription = "Limpar histórico")
             }

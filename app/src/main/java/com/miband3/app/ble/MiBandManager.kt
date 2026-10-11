@@ -12,7 +12,10 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.media.Ringtone
 import android.media.RingtoneManager
@@ -20,6 +23,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.miband3.app.ble.MiBandProtocol.AlertCategory
 import com.miband3.app.ble.MiBandProtocol.AuthResponse
 import com.miband3.app.ble.MiBandProtocol.DeviceEvent
@@ -100,6 +104,7 @@ object MiBandManager {
     private const val RECONNECT_DELAY_MS = 5_000L
     private const val DISCOVERY_TIMEOUT_MS = 15_000L
     private const val MAX_FAILED_ATTEMPTS = 4
+    private const val STABLE_CONNECTION_MS = 60_000L
     private const val HR_PING_INTERVAL_MS = 12_000L
     private const val MAX_LOG = 200
     const val ALARM_SLOTS = 3
@@ -133,6 +138,9 @@ object MiBandManager {
 
     /** Tentativas seguidas que caíram antes de a pulseira ficar pronta. */
     private var failedAttempts = 0
+
+    /** Momento em que a pulseira ficou pronta; quedas logo depois contam como falha. */
+    private var readySince = 0L
     private var ringtone: Ringtone? = null
 
     private val bluetoothAdapter: BluetoothAdapter?
@@ -154,7 +162,29 @@ object MiBandManager {
             forwardNotifications = prefs.getBoolean("forwardNotifications", false),
         )
         _alarms.value = (0 until ALARM_SLOTS).map { loadAlarm(it) }
+        registerBondReceiver()
         _state.update { it.copy(address = savedAddress, name = prefs.getString(KEY_NAME, null)) }
+    }
+
+    /** Registra no histórico quando o Android tenta parear (bond) com a pulseira — útil para diagnóstico. */
+    private fun registerBondReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                @Suppress("DEPRECATION")
+                val device: BluetoothDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE) ?: return
+                if (device.address != _state.value.address) return
+                val label = when (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1)) {
+                    BluetoothDevice.BOND_BONDING -> "Android iniciou pareamento Bluetooth com a pulseira…"
+                    BluetoothDevice.BOND_BONDED -> "Android pareado com a pulseira"
+                    BluetoothDevice.BOND_NONE -> "Pareamento Bluetooth do Android removido/falhou"
+                    else -> return
+                }
+                log(label, fromBand = false)
+            }
+        }
+        ContextCompat.registerReceiver(
+            appContext, receiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED,
+        )
     }
 
     // =================================================================== varredura
@@ -277,6 +307,8 @@ object MiBandManager {
 
     private fun explainStatus(status: Int, bonded: Boolean): String {
         val reason = when (status) {
+            0 -> "A conexão foi encerrada logo depois de abrir (código 0). Geralmente é a pulseira recusando " +
+                "este celular porque ainda está vinculada a outro app/celular, ou o Android tentando parear e falhando."
             8 -> "Tempo esgotado: a pulseira parou de responder (distância ou interferência)."
             19 -> "A pulseira encerrou a conexão. Normalmente isso acontece quando ela ainda está " +
                 "vinculada ao Mi Fit / Zepp Life (neste ou em outro celular) ou quando outro app está conectado a ela."
@@ -374,7 +406,9 @@ object MiBandManager {
                         }
                         log("Conexão perdida (código $status)", fromBand = false)
                         if (!userWantsConnection) return@post
-                        if (wasReady) {
+                        val readyFor = System.currentTimeMillis() - readySince
+                        if (wasReady) log("A conexão durou ${readyFor / 1000}s depois de autenticar", fromBand = false)
+                        if (wasReady && readyFor > STABLE_CONNECTION_MS) {
                             failedAttempts = 0
                         } else {
                             failedAttempts++
@@ -439,7 +473,12 @@ object MiBandManager {
         }
 
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-            handler.post { gattQueue.completeCurrent() }
+            handler.post {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    log("Falha ao ativar notificações de ${descriptor.characteristic.uuid} (código $status)", fromBand = false)
+                }
+                gattQueue.completeCurrent()
+            }
         }
 
         override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
@@ -513,6 +552,7 @@ object MiBandManager {
                 gatt?.disconnect()
             }
             is AuthResponse.RandomReceived -> {
+                log("Desafio recebido, respondendo…", fromBand = true)
                 val payload = MiBandProtocol.authSendEncrypted(response.random, authKey())
                 gattQueue.enqueue(GattQueue.Op.Write(MiBandUuids.CHAR_AUTH, payload, noResponse = true))
             }
@@ -533,7 +573,7 @@ object MiBandManager {
     }
 
     private fun onAuthenticated() {
-        failedAttempts = 0
+        readySince = System.currentTimeMillis()
         _state.update { it.copy(connection = ConnectionState.READY, awaitingTap = false, lastError = null) }
         log("Autenticado! Pulseira pronta.", fromBand = true)
         val q = gattQueue
@@ -781,6 +821,15 @@ object MiBandManager {
     fun log(text: String, fromBand: Boolean) {
         Log.i(TAG, text)
         _log.update { (it + LogEntry(System.currentTimeMillis(), text, fromBand)).takeLast(MAX_LOG) }
+    }
+
+    fun logAsText(): String {
+        val fmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+        val header = "Mi Band 3 app ${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} " +
+            "(pareado no Android: ${isBondedInAndroid()})"
+        return header + "\n" + _log.value.joinToString("\n") {
+            "${fmt.format(java.util.Date(it.time))} ${if (it.fromBand) "[pulseira]" else "[celular]"} ${it.text}"
+        }
     }
 
     fun clearLog() {
