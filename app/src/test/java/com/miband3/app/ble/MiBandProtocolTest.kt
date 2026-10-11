@@ -1,0 +1,128 @@
+package com.miband3.app.ble
+
+import com.miband3.app.ble.MiBandProtocol.AlertCategory
+import com.miband3.app.ble.MiBandProtocol.AuthResponse
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.util.Calendar
+import java.util.TimeZone
+
+class MiBandProtocolTest {
+
+    private val key = MiBandProtocol.hexToBytes("30313233343536373839404142434445")
+
+    @Test
+    fun authSendKeyHasHeaderAndKey() {
+        val packet = MiBandProtocol.authSendKey(key)
+        assertEquals(18, packet.size)
+        assertEquals(0x01.toByte(), packet[0])
+        assertEquals(0x08.toByte(), packet[1])
+        assertArrayEquals(key, packet.copyOfRange(2, 18))
+    }
+
+    @Test
+    fun authEncryptsRandomWithAesEcb() {
+        // Vetor de teste FIPS-197 (AES-128).
+        val fipsKey = MiBandProtocol.hexToBytes("000102030405060708090a0b0c0d0e0f")
+        val plain = MiBandProtocol.hexToBytes("00112233445566778899aabbccddeeff")
+        val packet = MiBandProtocol.authSendEncrypted(plain, fipsKey)
+        assertEquals(0x03.toByte(), packet[0])
+        assertEquals(0x08.toByte(), packet[1])
+        assertArrayEquals(MiBandProtocol.hexToBytes("69c4e0d86a7b0430d8cdb78070b4c55a"), packet.copyOfRange(2, 18))
+    }
+
+    @Test
+    fun parsesAuthResponses() {
+        assertEquals(AuthResponse.KeyAccepted, MiBandProtocol.parseAuthResponse(byteArrayOf(0x10, 0x01, 0x01)))
+        assertEquals(AuthResponse.KeyRejected, MiBandProtocol.parseAuthResponse(byteArrayOf(0x10, 0x01, 0x04)))
+        assertEquals(AuthResponse.Authenticated, MiBandProtocol.parseAuthResponse(byteArrayOf(0x10, 0x03, 0x01)))
+        assertEquals(AuthResponse.AuthFailed, MiBandProtocol.parseAuthResponse(byteArrayOf(0x10, 0x03, 0x04)))
+        assertEquals(AuthResponse.RandomFailed, MiBandProtocol.parseAuthResponse(byteArrayOf(0x10, 0x02, 0x04)))
+
+        val random = ByteArray(16) { it.toByte() }
+        val response = MiBandProtocol.parseAuthResponse(byteArrayOf(0x10, 0x02, 0x01) + random)
+        assertTrue(response is AuthResponse.RandomReceived)
+        assertArrayEquals(random, (response as AuthResponse.RandomReceived).random)
+
+        assertNull(MiBandProtocol.parseAuthResponse(byteArrayOf(0x01, 0x02)))
+    }
+
+    @Test
+    fun parsesBattery() {
+        val info = MiBandProtocol.parseBattery(byteArrayOf(0x0f, 87, 1, 0, 0))!!
+        assertEquals(87, info.level)
+        assertTrue(info.charging)
+    }
+
+    @Test
+    fun parsesSteps() {
+        // 1234 passos, 950 m, 45 kcal
+        val data = byteArrayOf(0x0c, 0xd2.toByte(), 0x04, 0, 0, 0xb6.toByte(), 0x03, 0, 0, 45, 0, 0, 0)
+        val info = MiBandProtocol.parseSteps(data)!!
+        assertEquals(1234, info.steps)
+        assertEquals(950, info.meters)
+        assertEquals(45, info.calories)
+    }
+
+    @Test
+    fun parsesHeartRate() {
+        assertEquals(72, MiBandProtocol.parseHeartRate(byteArrayOf(0x00, 72)))
+        assertEquals(300, MiBandProtocol.parseHeartRate(byteArrayOf(0x01, 0x2c, 0x01)))
+        assertNull(MiBandProtocol.parseHeartRate(byteArrayOf(0x00)))
+    }
+
+    @Test
+    fun encodesCurrentTime() {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("America/Sao_Paulo")).apply {
+            clear()
+            set(2024, Calendar.MARCH, 10, 14, 30, 15) // domingo
+        }
+        val bytes = MiBandProtocol.currentTime(cal)
+        assertEquals(11, bytes.size)
+        assertEquals(2024, (bytes[0].toInt() and 0xff) or ((bytes[1].toInt() and 0xff) shl 8))
+        assertEquals(3, bytes[2].toInt())
+        assertEquals(10, bytes[3].toInt())
+        assertEquals(14, bytes[4].toInt())
+        assertEquals(30, bytes[5].toInt())
+        assertEquals(15, bytes[6].toInt())
+        assertEquals(7, bytes[7].toInt()) // domingo = 7
+        assertEquals(-12, bytes[10].toInt()) // UTC-3 = -12 * 15 min
+    }
+
+    @Test
+    fun buildsAlerts() {
+        val sms = MiBandProtocol.newAlert(AlertCategory.SMS, "Ana", "Oi")
+        assertArrayEquals(byteArrayOf(0x05, 0x01) + "Ana\u0000Oi".toByteArray(), sms)
+
+        val app = MiBandProtocol.newAlert(AlertCategory.CUSTOM_HUAMI, "WhatsApp", "", MiBandProtocol.Icon.WHATSAPP)
+        assertArrayEquals(byteArrayOf(0xfa.toByte(), 0x01, 7) + "WhatsApp".toByteArray(), app)
+    }
+
+    @Test
+    fun truncatesUtf8WithoutBreakingCharacters() {
+        val text = "ação".repeat(100)
+        val bytes = MiBandProtocol.truncateUtf8(text, 15)
+        assertTrue(bytes.size <= 15)
+        // Decodificar e recodificar deve ser idempotente se nenhum caractere foi cortado ao meio.
+        assertArrayEquals(bytes, bytes.decodeToString().toByteArray())
+    }
+
+    @Test
+    fun buildsAlarms() {
+        val packet = MiBandProtocol.alarm(1, true, 6, 45, MiBandProtocol.Days.MONDAY or MiBandProtocol.Days.FRIDAY)
+        assertArrayEquals(byteArrayOf(0x02, 0x81.toByte(), 6, 45, 0x11), packet)
+
+        val once = MiBandProtocol.alarm(0, false, 7, 0, 0)
+        assertArrayEquals(byteArrayOf(0x02, 0x00, 7, 0, 0x80.toByte()), once)
+    }
+
+    @Test
+    fun recognizesDeviceEvents() {
+        assertEquals(MiBandProtocol.DeviceEvent.BUTTON_PRESSED, MiBandProtocol.DeviceEvent.fromData(byteArrayOf(0x04)))
+        assertEquals(MiBandProtocol.DeviceEvent.FIND_PHONE_START, MiBandProtocol.DeviceEvent.fromData(byteArrayOf(0x08)))
+        assertNull(MiBandProtocol.DeviceEvent.fromData(byteArrayOf(0x55)))
+    }
+}

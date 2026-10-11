@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Mi Band 3</string>
+    <string name="notification_access_label">Encaminhar notificações para a Mi Band 3</string>
+    <string name="channel_connection">Conexão com a pulseira</string>
+</resources>
