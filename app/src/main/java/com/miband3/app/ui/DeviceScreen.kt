@@ -97,6 +97,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
     DASHBOARD("Painel", Icons.Filled.Home),
     CHAT("Conversar", Icons.Filled.Email),
     ALARMS("Alarmes", Icons.Filled.DateRange),
+    CLOUD("Nuvem", Icons.Filled.Share),
     SETTINGS("Ajustes", Icons.Filled.Settings),
 }
 
@@ -135,6 +136,7 @@ fun DeviceScreen() {
                 Tab.DASHBOARD -> Dashboard(state)
                 Tab.CHAT -> Chat(state)
                 Tab.ALARMS -> Alarms()
+                Tab.CLOUD -> CloudTab()
                 Tab.SETTINGS -> SettingsTab(state)
             }
         }

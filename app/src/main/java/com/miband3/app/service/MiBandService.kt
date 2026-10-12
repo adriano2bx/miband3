@@ -15,11 +15,14 @@ import androidx.core.content.ContextCompat
 import com.miband3.app.R
 import com.miband3.app.ble.BandState
 import com.miband3.app.ble.MiBandManager
+import com.miband3.app.cloud.CloudClient
+import com.miband3.app.cloud.CloudStatus
 import com.miband3.app.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -44,7 +47,7 @@ class MiBandService : Service() {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(MiBandManager.state.value), type)
         scope.launch {
             MiBandManager.state
-                .map { Triple(it.connection, it.battery, it.steps) }
+                .combine(CloudClient.state.map { it.status }.distinctUntilChanged()) { s, cloud -> listOf(s.connection, s.battery, s.steps, cloud) }
                 .distinctUntilChanged()
                 .collect {
                     getSystemService(NotificationManager::class.java)
@@ -56,7 +59,8 @@ class MiBandService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_DISCONNECT) {
             MiBandManager.disconnect()
-            stopSelf()
+            // Com o envio à nuvem ligado o serviço continua para manter o WebSocket vivo.
+            if (!CloudClient.isUsable) stopSelf()
         }
         return START_STICKY
     }
@@ -75,9 +79,11 @@ class MiBandService : Service() {
             this, 1, Intent(this, MiBandService::class.java).setAction(ACTION_DISCONNECT),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val cloud = CloudClient.state.value
         val details = buildList {
             state.battery?.let { add("Bateria $it%") }
             state.steps?.let { add("$it passos") }
+            if (cloud.status != CloudStatus.DISABLED) add("Nuvem: ${cloud.status.label}")
         }.joinToString(" · ")
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_band)
@@ -100,6 +106,7 @@ class MiBandService : Service() {
         }
 
         fun stop(context: Context) {
+            if (CloudClient.isUsable) return
             context.stopService(Intent(context, MiBandService::class.java))
         }
     }

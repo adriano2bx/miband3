@@ -12,6 +12,7 @@ App Android (Kotlin + Jetpack Compose) que pareia, controla e troca mensagens co
 | **Conversar** | Envia SMS, notificação de app, e-mail ou chamada simulada (com nome de quem liga) para a tela da pulseira. Um histórico em formato de chat mostra o que o celular enviou e os eventos que a pulseira mandou de volta: botão pressionado, chamada rejeitada, meta de passos, pulseira retirada etc. |
 | **Procurar celular** | Quando você usa "Encontrar celular" na pulseira, o celular toca até você confirmar. |
 | **Alarmes** | Três alarmes gravados na própria pulseira, com dias da semana ou "apenas uma vez". |
+| **Nuvem** | Envia FC, passos, bateria, eventos e o histórico de sono/atividade em tempo real, por WebSocket, a um serviço próprio no Cloudflare (pasta [`cloud/`](cloud/README.md)), e executa comandos remotos (vibrar, mensagem, medir FC, alarmes). Pensado para monitorar pacientes à distância. |
 | **Ajustes** | Relógio de 12/24 h, acender a tela ao levantar o pulso, sincronizar data e hora, encaminhar automaticamente as notificações do celular (WhatsApp, Telegram, Instagram, chamadas… cada uma com o ícone certo na pulseira). |
 
 Um serviço em primeiro plano mantém a conexão ativa com o app em segundo plano.
@@ -65,7 +66,17 @@ O código fica em `app/src/main/java/com/miband3/app/ble/`:
 
 O protocolo foi baseado no trabalho de engenharia reversa do projeto [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge).
 
+## Monitoramento remoto (nuvem)
+
+A pasta [`cloud/`](cloud/README.md) contém o serviço (Cloudflare Workers + Durable Objects + D1) com API REST/WebSocket completa: dados ao vivo, histórico, alertas com regras, webhooks e comandos para a pulseira. No app, a aba **Nuvem** recebe o endereço do serviço e o token da pulseira. O app reconecta sozinho, guarda os dados enquanto está sem internet e mantém o serviço em primeiro plano.
+
+```bash
+cd cloud && npm install && npm test      # 30 testes no runtime real do Workers
+```
+
 ## Limitações conhecidas
+
+- O download do histórico por minuto (base do cálculo de sono) segue o protocolo do Gadgetbridge, mas **ainda não foi testado numa Mi Band 3 real**; os códigos de categoria de sono são provisórios (veja `cloud/README.md`).
 
 - Não baixa o histórico de atividade e sono, nem atualiza firmware. Mostra só os dados em tempo real.
 - Textos muito longos são truncados (cerca de 200 bytes) e a pulseira só exibe caracteres que a fonte dela suporta.

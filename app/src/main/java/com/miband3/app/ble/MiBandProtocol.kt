@@ -316,6 +316,91 @@ object MiBandProtocol {
         }
     }
 
+    // ---------------------------------------------------------------- histórico de atividade (sono, passos, FC por minuto)
+
+    /**
+     * Protocolo de download do histórico guardado na pulseira (baseado no Gadgetbridge; ainda
+     * sem validação em hardware real neste projeto):
+     * 1. escreve `01 01 <data>` em 0004 -> a pulseira responde `10 01 01 <bytes:4> <data início>`;
+     * 2. escreve `02` em 0004 -> os dados chegam em 0005, `<contador> (categoria intensidade passos fc)*`,
+     *    um item por minuto a partir da data de início;
+     * 3. a pulseira avisa o fim com `10 02 01`; o app confirma com `03 <09 manter | 01 apagar>`.
+     */
+    private const val FETCH_START_DATE: Byte = 0x01
+    private const val FETCH_BEGIN: Byte = 0x02
+    private const val FETCH_ACK: Byte = 0x03
+    private const val FETCH_TYPE_ACTIVITY: Byte = 0x01
+
+    fun activityFetchStart(sinceMs: Long, timeZone: TimeZone = TimeZone.getDefault()): ByteArray {
+        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = sinceMs }
+        val year = cal.get(Calendar.YEAR)
+        val offsetQuarters = timeZone.getOffset(sinceMs) / (15 * 60 * 1000)
+        return byteArrayOf(
+            FETCH_START_DATE, FETCH_TYPE_ACTIVITY,
+            (year and 0xff).toByte(), ((year shr 8) and 0xff).toByte(),
+            (cal.get(Calendar.MONTH) + 1).toByte(),
+            cal.get(Calendar.DAY_OF_MONTH).toByte(),
+            cal.get(Calendar.HOUR_OF_DAY).toByte(),
+            cal.get(Calendar.MINUTE).toByte(),
+            offsetQuarters.toByte(),
+        )
+    }
+
+    fun activityFetchBegin(): ByteArray = byteArrayOf(FETCH_BEGIN)
+
+    /** Confirma o recebimento. Por segurança do paciente, o padrão é manter os dados na pulseira. */
+    fun activityFetchAck(keepOnDevice: Boolean = true): ByteArray =
+        byteArrayOf(FETCH_ACK, if (keepOnDevice) 0x09 else 0x01)
+
+    sealed class FetchResponse {
+        class Ready(val expectedBytes: Long, val startMs: Long) : FetchResponse()
+        data object NoData : FetchResponse()
+        data object Finished : FetchResponse()
+        data object Failed : FetchResponse()
+    }
+
+    fun parseFetchResponse(data: ByteArray, timeZone: TimeZone = TimeZone.getDefault()): FetchResponse? {
+        if (data.size < 3 || data[0] != AUTH_RESPONSE) return null
+        val ok = data[2] == AUTH_SUCCESS
+        return when (data[1]) {
+            FETCH_START_DATE -> when {
+                !ok -> if (data[2] == 0x02.toByte()) FetchResponse.NoData else FetchResponse.Failed
+                data.size < 12 -> FetchResponse.Failed
+                else -> {
+                    val expected = uint32Le(data, 3).toLong() and 0xffffffffL
+                    val year = (data[7].toInt() and 0xff) or ((data[8].toInt() and 0xff) shl 8)
+                    val cal = Calendar.getInstance(timeZone).apply {
+                        clear()
+                        set(year, (data[9].toInt() and 0xff) - 1, data[10].toInt() and 0xff, data[11].toInt() and 0xff, if (data.size > 12) data[12].toInt() and 0xff else 0, 0)
+                    }
+                    if (expected == 0L) FetchResponse.NoData else FetchResponse.Ready(expected, cal.timeInMillis)
+                }
+            }
+            FETCH_BEGIN -> if (ok) FetchResponse.Finished else FetchResponse.Failed
+            else -> null
+        }
+    }
+
+    /** Uma amostra por minuto: categoria bruta, intensidade, passos e FC (0 ou 255 = sem leitura). */
+    data class ActivitySample(val ts: Long, val kind: Int, val intensity: Int, val steps: Int, val hr: Int?)
+
+    /** Interpreta um pacote de dados (0005): contador + grupos de 4 bytes. */
+    fun parseActivityPacket(data: ByteArray, firstSampleMs: Long): List<ActivitySample> {
+        if (data.size < 5) return emptyList()
+        val count = (data.size - 1) / 4
+        return List(count) { i ->
+            val o = 1 + i * 4
+            val hr = data[o + 3].toInt() and 0xff
+            ActivitySample(
+                ts = firstSampleMs + i * 60_000L,
+                kind = data[o].toInt() and 0xff,
+                intensity = data[o + 1].toInt() and 0xff,
+                steps = data[o + 2].toInt() and 0xff,
+                hr = if (hr == 0 || hr == 0xff) null else hr,
+            )
+        }
+    }
+
     // ---------------------------------------------------------------- utilidades
 
     fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }

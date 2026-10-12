@@ -29,8 +29,11 @@ import com.miband3.app.ble.MiBandProtocol.AuthResponse
 import com.miband3.app.ble.MiBandProtocol.DeviceEvent
 import com.miband3.app.ble.MiBandProtocol.toHex
 import com.miband3.app.service.MiBandService
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.security.SecureRandom
@@ -116,6 +119,7 @@ object MiBandManager {
     private const val MAX_FAILED_ATTEMPTS = 4
     private const val STABLE_CONNECTION_MS = 60_000L
     private const val HR_PING_INTERVAL_MS = 12_000L
+    private const val FETCH_TIMEOUT_MS = 20_000L
     private const val MAX_LOG = 200
     const val ALARM_SLOTS = 3
 
@@ -132,6 +136,9 @@ object MiBandManager {
 
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
+
+    private val _events = MutableSharedFlow<BandEvent>(extraBufferCapacity = 512)
+    val events: SharedFlow<BandEvent> = _events.asSharedFlow()
 
     private val _log = MutableStateFlow<List<LogEntry>>(emptyList())
     val log: StateFlow<List<LogEntry>> = _log.asStateFlow()
@@ -268,6 +275,19 @@ object MiBandManager {
 
     fun connectSaved() {
         savedAddress?.let { connect(it, prefs.getString(KEY_NAME, null)) }
+    }
+
+    /**
+     * Reconecta à pulseira salva sem interação do usuário (ex.: o processo foi recriado com o
+     * envio à nuvem ligado). Não faz nada se faltar permissão ou o Bluetooth estiver desligado.
+     */
+    fun reconnectIfSaved() {
+        if (savedAddress == null || userWantsConnection || _state.value.connection != ConnectionState.DISCONNECTED) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        if (!isBluetoothEnabled) return
+        connectSaved()
     }
 
     private fun connectInternal(address: String) {
@@ -413,6 +433,7 @@ object MiBandManager {
                         handler.removeCallbacks(discoveryTimeout)
                         val wasReady = _state.value.connection == ConnectionState.READY
                         stopHeartRatePing()
+                        if (fetchStep != FetchStep.IDLE) finishFetch(success = false)
                         closeGatt()
                         _state.update {
                             it.copy(
@@ -622,6 +643,8 @@ object MiBandManager {
             MiBandUuids.CHAR_STEPS,
             MiBandUuids.CHAR_BATTERY,
             MiBandUuids.CHAR_HR_MEASUREMENT,
+            MiBandUuids.CHAR_ACTIVITY_CONTROL,
+            MiBandUuids.CHAR_ACTIVITY_DATA,
         ).forEach { q.enqueue(GattQueue.Op.Notify(it)) }
         syncTime()
         applySettings()
@@ -641,12 +664,19 @@ object MiBandManager {
             MiBandUuids.CHAR_AUTH -> handleAuth(data)
             MiBandUuids.CHAR_BATTERY -> MiBandProtocol.parseBattery(data)?.let { b ->
                 _state.update { it.copy(battery = b.level, charging = b.charging) }
+                _events.tryEmit(BandEvent.Battery(System.currentTimeMillis(), b.level, b.charging))
             }
             MiBandUuids.CHAR_STEPS -> MiBandProtocol.parseSteps(data)?.let { a ->
                 _state.update { it.copy(steps = a.steps, meters = a.meters ?: it.meters, calories = a.calories ?: it.calories) }
+                _events.tryEmit(BandEvent.Steps(System.currentTimeMillis(), a.steps, a.meters, a.calories))
             }
+            MiBandUuids.CHAR_ACTIVITY_CONTROL -> handleFetchControl(data)
+            MiBandUuids.CHAR_ACTIVITY_DATA -> handleFetchData(data)
             MiBandUuids.CHAR_HR_MEASUREMENT -> MiBandProtocol.parseHeartRate(data)?.let { bpm ->
-                if (bpm > 0) log("Frequência cardíaca: $bpm bpm", fromBand = true)
+                if (bpm > 0) {
+                    log("Frequência cardíaca: $bpm bpm", fromBand = true)
+                    _events.tryEmit(BandEvent.HeartRate(System.currentTimeMillis(), bpm))
+                }
                 _state.update {
                     it.copy(heartRate = if (bpm > 0) bpm else it.heartRate, measuringHeartRate = it.continuousHeartRate)
                 }
@@ -664,6 +694,7 @@ object MiBandManager {
         val event = DeviceEvent.fromData(data)
         if (event == null) {
             log("Evento desconhecido: ${data.toHex()}", fromBand = true)
+            _events.tryEmit(BandEvent.Device(System.currentTimeMillis(), "UNKNOWN_${data.toHex()}", "Evento desconhecido"))
             return
         }
         when (event) {
@@ -672,6 +703,7 @@ object MiBandManager {
             DeviceEvent.TICK_30MIN -> return // muito frequente para o histórico
             else -> Unit
         }
+        _events.tryEmit(BandEvent.Device(System.currentTimeMillis(), event.name, event.description))
         log(event.description, fromBand = true)
     }
 
@@ -795,6 +827,122 @@ object MiBandManager {
 
     private fun stopHeartRatePing() {
         handler.removeCallbacks(hrPingRunnable)
+    }
+
+    /**
+     * Vibra [count] vezes: cada pulso dura [durationMs] e há [pauseMs] entre eles.
+     * A pulseira vibra enquanto o nível de alerta está ligado, então desligamos ao fim de cada pulso.
+     */
+    fun vibratePattern(count: Int, durationMs: Long, pauseMs: Long, high: Boolean = true) {
+        if (!requireReady()) return
+        val level = if (high) MiBandProtocol.AlertLevel.HIGH else MiBandProtocol.AlertLevel.MILD
+        for (i in 0 until count.coerceIn(1, 10)) {
+            val start = i * (durationMs + pauseMs)
+            handler.postDelayed({
+                write(MiBandUuids.CHAR_ALERT_LEVEL, byteArrayOf(level), noResponse = true)
+            }, start)
+            handler.postDelayed({
+                write(MiBandUuids.CHAR_ALERT_LEVEL, byteArrayOf(MiBandProtocol.AlertLevel.NONE), noResponse = true)
+            }, start + durationMs)
+        }
+        log("Vibrar ${count}x", fromBand = false)
+    }
+
+    // =================================================================== histórico (sono / atividade por minuto)
+
+    private enum class FetchStep { IDLE, WAITING_START, WAITING_DATA }
+
+    private var fetchStep = FetchStep.IDLE
+    private var fetchStartMs = 0L
+    private var fetchNextSampleMs = 0L
+    private val fetchSamples = ArrayList<MiBandProtocol.ActivitySample>()
+    private val fetchTimeout = Runnable {
+        if (fetchStep != FetchStep.IDLE) {
+            log("Tempo esgotado ao baixar o histórico da pulseira", fromBand = false)
+            finishFetch(success = false)
+        }
+    }
+
+    /** Callback do último download: (ok, mensagem). Usado para confirmar comandos da nuvem. */
+    private var fetchCallback: ((Boolean, String) -> Unit)? = null
+
+    val lastActivitySyncMs: Long
+        get() = prefs.getLong("lastActivitySync", 0L)
+
+    /**
+     * Baixa da pulseira as amostras por minuto desde [sinceMs] (padrão: a última sincronização,
+     * limitada a 24 h). O resultado sai em [events] como [BandEvent.Activity].
+     */
+    fun fetchHistory(sinceMs: Long? = null, onDone: ((Boolean, String) -> Unit)? = null) {
+        if (!isReady) {
+            onDone?.invoke(false, "pulseira desconectada")
+            return
+        }
+        if (fetchStep != FetchStep.IDLE) {
+            onDone?.invoke(false, "download do histórico já em andamento")
+            return
+        }
+        val now = System.currentTimeMillis()
+        val since = (sinceMs ?: lastActivitySyncMs).coerceAtLeast(now - 24 * 3600_000L).coerceAtMost(now)
+        fetchStep = FetchStep.WAITING_START
+        fetchCallback = onDone
+        fetchSamples.clear()
+        log("Baixando histórico da pulseira…", fromBand = false)
+        write(MiBandUuids.CHAR_ACTIVITY_CONTROL, MiBandProtocol.activityFetchStart(since))
+        handler.removeCallbacks(fetchTimeout)
+        handler.postDelayed(fetchTimeout, FETCH_TIMEOUT_MS)
+    }
+
+    private fun handleFetchControl(data: ByteArray) {
+        if (fetchStep == FetchStep.IDLE) return
+        when (val r = MiBandProtocol.parseFetchResponse(data)) {
+            is MiBandProtocol.FetchResponse.Ready -> {
+                if (fetchStep != FetchStep.WAITING_START) return
+                fetchStartMs = r.startMs
+                fetchNextSampleMs = r.startMs
+                fetchStep = FetchStep.WAITING_DATA
+                write(MiBandUuids.CHAR_ACTIVITY_CONTROL, MiBandProtocol.activityFetchBegin())
+            }
+            MiBandProtocol.FetchResponse.NoData -> {
+                log("Pulseira sem histórico novo", fromBand = true)
+                finishFetch(success = true)
+            }
+            MiBandProtocol.FetchResponse.Finished -> {
+                write(MiBandUuids.CHAR_ACTIVITY_CONTROL, MiBandProtocol.activityFetchAck(keepOnDevice = true))
+                finishFetch(success = true)
+            }
+            MiBandProtocol.FetchResponse.Failed -> {
+                log("A pulseira recusou o download do histórico (${data.toHex()})", fromBand = true)
+                finishFetch(success = false)
+            }
+            null -> Log.d(TAG, "Resposta de histórico desconhecida: ${data.toHex()}")
+        }
+    }
+
+    private fun handleFetchData(data: ByteArray) {
+        if (fetchStep != FetchStep.WAITING_DATA) return
+        val samples = MiBandProtocol.parseActivityPacket(data, fetchNextSampleMs)
+        fetchNextSampleMs += samples.size * 60_000L
+        fetchSamples += samples
+        // Cada pacote reinicia o prazo: o download de um dia inteiro leva alguns segundos.
+        handler.removeCallbacks(fetchTimeout)
+        handler.postDelayed(fetchTimeout, FETCH_TIMEOUT_MS)
+    }
+
+    private fun finishFetch(success: Boolean) {
+        handler.removeCallbacks(fetchTimeout)
+        val callback = fetchCallback
+        fetchCallback = null
+        fetchStep = FetchStep.IDLE
+        // Amostras 0xff = minuto sem registro (pulseira desligada/carregando).
+        val valid = fetchSamples.filter { it.kind != 0xff }
+        fetchSamples.clear()
+        if (success && valid.isNotEmpty()) {
+            prefs.edit().putLong("lastActivitySync", valid.last().ts + 60_000L).apply()
+            _events.tryEmit(BandEvent.Activity(System.currentTimeMillis(), valid))
+            log("Histórico baixado: ${valid.size} minutos", fromBand = true)
+        }
+        callback?.invoke(success, if (success) "${valid.size} amostras" else "falha ao baixar o histórico")
     }
 
     fun syncTime() {

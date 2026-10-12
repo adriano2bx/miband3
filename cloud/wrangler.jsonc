@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "miband3-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Um Durable Object por pulseira (conexões WebSocket + tempo real) e um
+  // "Fleet" único para o fluxo global de todos os pacientes.
+  "durable_objects": {
+    "bindings": [
+      { "name": "HUB", "class_name": "DeviceHub" },
+      { "name": "FLEET", "class_name": "Fleet" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceHub", "Fleet"] }],
+
+  // Rode `npx wrangler d1 create miband3` e cole o database_id aqui.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "miband3",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Limpeza diária de dados antigos (RETENTION_DAYS).
+  "triggers": { "crons": ["17 3 * * *"] },
+
+  "vars": {
+    "RETENTION_DAYS": "365"
+  }
+  // Segredo obrigatório:  npx wrangler secret put ADMIN_API_KEY
+}

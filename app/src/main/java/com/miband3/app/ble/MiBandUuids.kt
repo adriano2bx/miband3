@@ -18,6 +18,10 @@ object MiBandUuids {
     val CHAR_BATTERY: UUID = huami("0006")
     val CHAR_STEPS: UUID = huami("0007")
 
+    /** Histórico de atividade: ponto de controle (escrita + notificação) e fluxo de dados (notificação). */
+    val CHAR_ACTIVITY_CONTROL: UUID = huami("0004")
+    val CHAR_ACTIVITY_DATA: UUID = huami("0005")
+
     /** Perfil do usuário, pulso e meta de passos. */
     val CHAR_USER_SETTINGS: UUID = huami("0008")
 
