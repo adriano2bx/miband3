@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -23,6 +25,19 @@ jobs:
           name: biosense-screens
           path: app/src/test/snapshots/images/*.png
           if-no-files-found: ignore
+      - name: Publicar capturas na branch ci-screenshots
+        # Para revisão rápida pelo navegador (raw.githubusercontent.com). Push feito com o
+        # GITHUB_TOKEN não dispara outros workflows.
+        if: github.event_name == 'push'
+        run: |
+          set -e
+          mkdir -p /tmp/shots && cp app/src/test/snapshots/images/*.png /tmp/shots/
+          cd /tmp/shots
+          git init -q -b ci-screenshots
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add . && git commit -q -m "Capturas de ${GITHUB_SHA::7} (${GITHUB_REF_NAME})"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-screenshots
       - name: Gerar APK
         # Endereço do serviço: variável do repositório BIOSENSE_CLOUD_URL (Settings > Variables).
         env:
