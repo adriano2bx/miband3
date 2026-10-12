@@ -111,13 +111,20 @@ enum class PermissionOutcome { UNKNOWN, DENIED, PERMANENTLY_DENIED }
 fun SetupPrepareScreen(onReady: () -> Unit) {
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh++ }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        MiBandManager.refreshBluetoothState()
+        refresh++
+    }
     val btOn by MiBandManager.bluetoothOn.collectAsStateWithLifecycle()
     val granted = remember(refresh) { hasBluetoothPermissions(context) }
     var outcome by rememberSaveable { mutableStateOf(PermissionOutcome.UNKNOWN) }
 
-    val enableBt = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { refresh++ }
+    val enableBt = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        MiBandManager.refreshBluetoothState()
+        refresh++
+    }
     val requestPerms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        MiBandManager.refreshBluetoothState()
         refresh++
         val btGranted = bluetoothPermissions().all { result[it] == true || hasBluetoothPermissions(context) }
         outcome = when {

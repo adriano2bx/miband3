@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -17,6 +18,7 @@ import com.miband3.app.cloud.CloudClient
 import com.miband3.app.status.StatusKind
 import com.miband3.app.status.StatusMonitor
 import com.miband3.app.status.titleRes
+import com.miband3.app.status.hasBluetoothPermissions
 import com.miband3.app.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,13 +33,31 @@ import kotlinx.coroutines.launch
  */
 class MiBandService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var foregroundStarted = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        // O aceite do termo acontece antes do pedido de Dispositivos próximos.
+        // Revalida também no serviço, caso a permissão mude após start().
+        if (!hasBluetoothPermissions(this)) {
+            stopSelf()
+            return
+        }
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(StatusMonitor.status.value), type)
+        try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(StatusMonitor.status.value), type)
+            foregroundStarted = true
+        } catch (e: SecurityException) {
+            Log.w(CHANNEL_ID, "Permissão insuficiente para iniciar o serviço", e)
+            stopSelf()
+            return
+        } catch (e: IllegalStateException) {
+            Log.w(CHANNEL_ID, "Android não permitiu iniciar o serviço neste estado", e)
+            stopSelf()
+            return
+        }
         scope.launch {
             StatusMonitor.status.collect { status ->
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(status))
@@ -45,7 +65,8 @@ class MiBandService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
+        if (foregroundStarted) START_STICKY else START_NOT_STICKY
 
     override fun onDestroy() {
         scope.cancel()
@@ -72,8 +93,20 @@ class MiBandService : Service() {
         const val CHANNEL_ID = "connection"
         private const val NOTIFICATION_ID = 1
 
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, MiBandService::class.java))
+        fun start(context: Context): Boolean {
+            // CloudClient.start() é chamado no consentimento e na abertura do app.
+            // Não agenda onCreate() antes de conceder as permissões de Bluetooth.
+            if (!hasBluetoothPermissions(context)) return false
+            return try {
+                ContextCompat.startForegroundService(context, Intent(context, MiBandService::class.java))
+                true
+            } catch (e: SecurityException) {
+                Log.w(CHANNEL_ID, "Permissão alterada antes de iniciar o serviço", e)
+                false
+            } catch (e: IllegalStateException) {
+                Log.w(CHANNEL_ID, "Início do serviço indisponível neste estado", e)
+                false
+            }
         }
 
         fun stop(context: Context) {

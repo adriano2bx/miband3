@@ -191,7 +191,12 @@ object MiBandManager {
         get() = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
     val isBluetoothEnabled: Boolean
-        get() = bluetoothAdapter?.isEnabled == true
+        get() = try { bluetoothAdapter?.isEnabled == true } catch (e: SecurityException) { false }
+
+    /** A concessão da permissão não emite uma mudança de estado do adaptador. */
+    fun refreshBluetoothState() {
+        _bluetoothOn.value = isBluetoothEnabled
+    }
 
     val savedAddress: String?
         get() = prefs.getString(KEY_ADDRESS, null)

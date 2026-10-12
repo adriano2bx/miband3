@@ -14,8 +14,8 @@ android {
         applicationId = "com.miband3.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.0.1"
+        versionCode = 4
+        versionName = "2.0.2"
 
         // Endereço do serviço BIOSENSE na nuvem (não é segredo). Padrão: o domínio oficial;
         // para testes use -Pbiosense.cloudUrl=... ou a variável de ambiente BIOSENSE_CLOUD_URL.
@@ -42,6 +42,9 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -62,6 +65,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
     // org.json do Android é só um stub nos testes de JVM.
     testImplementation("org.json:json:20240303")
 }
