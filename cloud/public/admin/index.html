@@ -195,6 +195,38 @@
   </form>
 </dialog>
 
+<!-- Diálogo: comandos para a pulseira -->
+<dialog id="cmdDialog">
+  <h1>Comandos para a pulseira</h1>
+  <p class="sub" id="cmdFor"></p>
+  <div id="cmdLive" class="notice warn" style="margin-bottom:12px"></div>
+  <div class="card" style="padding:12px">
+    <h2>Vibrar</h2>
+    <div class="row">
+      <div><label for="vibCount">Vezes</label><select id="vibCount"><option>1</option><option selected>2</option><option>3</option><option>5</option></select></div>
+      <div><label for="vibLevel">Intensidade</label><select id="vibLevel"><option value="high">Forte</option><option value="mild">Leve</option></select></div>
+      <div style="flex:0 0 auto"><button class="btn" id="cmdVibrate">Vibrar agora</button></div>
+    </div>
+  </div>
+  <div class="card" style="padding:12px">
+    <h2>Mensagem na tela da pulseira</h2>
+    <div class="grid2">
+      <div><label for="msgTitle">Título (até 32)</label><input id="msgTitle" maxlength="32" placeholder="ex.: BIOSENSE"></div>
+      <div><label for="msgBody">Texto (até 200)</label><input id="msgBody" maxlength="200" placeholder="ex.: Lembrete do estudo"></div>
+    </div>
+    <div style="margin-top:8px"><button class="btn" id="cmdMessage">Enviar mensagem</button></div>
+  </div>
+  <div class="actions" style="margin-bottom:16px">
+    <button class="btn secondary" id="cmdHr">Medir frequência cardíaca</button>
+    <button class="btn secondary" id="cmdHistory">Baixar histórico</button>
+    <button class="btn secondary" id="cmdTime">Sincronizar hora</button>
+  </div>
+  <h2>Últimos comandos</h2>
+  <div class="table-wrap"><table><thead><tr><th>Quando</th><th>Comando</th><th>Situação</th></tr></thead><tbody id="cmdList"></tbody></table></div>
+  <p class="muted">"Executado" significa que o app escreveu o comando na pulseira; a vibração em si só pode ser confirmada por quem está com ela.</p>
+  <div class="actions" style="margin-top:12px;justify-content:flex-end"><button class="btn secondary" onclick="this.closest('dialog').close()">Fechar</button></div>
+</dialog>
+
 <!-- Diálogo: consentimentos -->
 <dialog id="consDialog">
   <h1>Consentimentos</h1>
@@ -289,6 +321,7 @@ const loadInstalls = guard(async () => {
     el("td", {}, hrLabel(d.config.hr_interval_min), el("div", { class: "muted" }, `v${d.config_version}${d.config.band_profile ? " · perfil físico" : ""}`)),
     el("td", {}, el("div", { class: "actions" },
       d.status !== "active" ? el("button", { class: "btn", onclick: () => authorize(d) }, "Autorizar") : null,
+      d.status === "active" ? el("button", { class: "btn", onclick: () => openCommands(d) }, "Comandos") : null,
       el("button", { class: "btn secondary", onclick: () => editConfig(d) }, "Coleta"),
       d.status !== "revoked" ? el("button", { class: "btn danger", onclick: () => revoke(d) }, "Bloquear") : null,
     )),
@@ -355,6 +388,72 @@ const showConsents = guard(async (d) => {
     : [el("tr", {}, el("td", { colspan: "3", class: "muted" }, "Sem registros."))]));
   $("#consDialog").showModal();
 });
+
+// ------------------------------------------------------------------ comandos
+const cmdNames = { vibrate: "Vibrar", message: "Mensagem", measure_hr: "Medir FC", fetch_history: "Baixar histórico", sync_time: "Sincronizar hora", hr_continuous: "FC contínua", refresh: "Atualizar", set_alarm: "Alarme", stop_call: "Encerrar chamada" };
+const cmdStatus = {
+  queued: ["Na fila (celular offline)", "pending"], sent: ["Enviado ao celular", "pending"], acked: ["Executado", "active"],
+  failed: ["Falhou", "revoked"], timeout: ["Sem confirmação", "revoked"], expired: ["Expirou", "revoked"], cancelled: ["Cancelado", ""],
+};
+let cmdDevice = null;
+let cmdTimer = null;
+
+function openCommands(d) {
+  cmdDevice = d;
+  $("#cmdFor").textContent = `${d.patient_ref || "Sem referência"} · ${d.id}`;
+  $("#cmdList").replaceChildren();
+  $("#cmdLive").textContent = "Carregando estado…";
+  refreshCommands();
+  clearInterval(cmdTimer);
+  cmdTimer = setInterval(refreshCommands, 2500);
+  $("#cmdDialog").showModal();
+}
+$("#cmdDialog").addEventListener("close", () => clearInterval(cmdTimer));
+
+async function refreshCommands() {
+  if (!cmdDevice) return;
+  try {
+    const id = encodeURIComponent(cmdDevice.id);
+    const [st, cmds] = await Promise.all([api("GET", `/v1/devices/${id}/status`), api("GET", `/v1/devices/${id}/commands?order=desc&limit=10`)]);
+    const l = st.latest || {};
+    const parts = [st.online ? "Celular conectado ao serviço" : "Celular offline — os comandos ficam na fila"];
+    if (l.state) parts.push(`pulseira: ${l.state.connection === "READY" ? "conectada" : "desconectada"}`);
+    if (l.hr) parts.push(`FC ${l.hr.bpm} bpm às ${new Date(l.hr.ts).toLocaleTimeString("pt-BR")}`);
+    if (l.battery) parts.push(`bateria ${l.battery.level}%`);
+    if (l.steps) parts.push(`${l.steps.steps} passos`);
+    const live = $("#cmdLive");
+    live.textContent = parts.join(" · ");
+    live.className = `notice ${st.online && l.state?.connection === "READY" ? "ok" : "warn"}`;
+    $("#cmdList").replaceChildren(...(cmds.data.length ? cmds.data.map((c) => {
+      const [label, kind] = cmdStatus[c.status] || [c.status, ""];
+      return el("tr", {}, el("td", {}, fmt(c.created_at)), el("td", {}, cmdNames[c.type] || c.type),
+        el("td", {}, el("span", { class: `pill ${kind}` }, label), c.error ? el("div", { class: "muted" }, c.error) : null));
+    }) : [el("tr", {}, el("td", { colspan: "3", class: "muted" }, "Nenhum comando enviado."))]));
+  } catch (e) { if (e.message !== "unauthorized") $("#cmdLive").textContent = e.message; }
+}
+
+// Erros aparecem dentro da janela (o aviso geral fica atrás dela).
+const cmdGuard = (fn) => async () => {
+  try { await fn(); } catch (e) {
+    if (e.message === "unauthorized") return;
+    const live = $("#cmdLive"); live.textContent = e.message; live.className = "notice error";
+  }
+};
+
+async function sendCommand(type, params, ttl_s = 120) {
+  await api("POST", `/v1/devices/${encodeURIComponent(cmdDevice.id)}/commands`, { type, params, ttl_s });
+  refreshCommands();
+}
+$("#cmdVibrate").addEventListener("click", cmdGuard(() => sendCommand("vibrate", { count: Number($("#vibCount").value), level: $("#vibLevel").value }, 60)));
+$("#cmdMessage").addEventListener("click", cmdGuard(async () => {
+  const title = $("#msgTitle").value.trim();
+  if (!title) throw new Error("Informe o título da mensagem.");
+  await sendCommand("message", { kind: "app", title, body: $("#msgBody").value.trim() });
+  $("#msgBody").value = "";
+}));
+$("#cmdHr").addEventListener("click", cmdGuard(() => sendCommand("measure_hr", {})));
+$("#cmdHistory").addEventListener("click", cmdGuard(() => sendCommand("fetch_history", {}, 300)));
+$("#cmdTime").addEventListener("click", cmdGuard(() => sendCommand("sync_time", {})));
 
 // ------------------------------------------------------------------ termo
 const loadTerms = guard(async () => {
