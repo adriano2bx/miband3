@@ -70,6 +70,7 @@
   <svg viewBox="0 0 200 240" aria-hidden="true"><path fill="#126C64" d="M 20 12 L 100 12 C 160 12 184 66 152 120 C 118 78 50 66 20 12 Z"/><path fill="#126C64" d="M 152 120 C 194 170 176 228 110 228 L 20 228 C 54 170 114 163 152 120 Z"/><circle fill="#126C64" cx="65" cy="120" r="29"/></svg>
   <div class="brand"><b>BIOSENSE</b><small>by DELTABOTS</small></div>
   <div class="spacer"></div>
+  <a class="btn secondary hidden" id="docsLink" href="/docs/" style="text-decoration:none;display:inline-flex;align-items:center">Documentação da API</a>
   <span class="who" id="who"></span>
   <button class="btn secondary hidden" id="logout">Sair</button>
 </header>
@@ -277,7 +278,7 @@ const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (
 // ------------------------------------------------------------------ sessão
 function logout(msg) {
   apiKey = ""; sessionStorage.removeItem(KEY);
-  $("#app").classList.add("hidden"); $("#logout").classList.add("hidden"); $("#who").textContent = "";
+  $("#app").classList.add("hidden"); $("#logout").classList.add("hidden"); $("#docsLink").classList.add("hidden"); $("#who").textContent = "";
   $("#login").classList.remove("hidden");
   $("#loginMsg").replaceChildren(msg ? el("div", { class: "notice error", style: "margin-top:12px" }, msg) : "");
 }
@@ -287,7 +288,7 @@ async function start() {
     const me = await api("GET", "/v1/me");
     if (!me.scopes.includes("manage")) return logout("Esta chave não tem permissão de gestão.");
     $("#who").textContent = me.id === "admin" ? "Chave mestra" : me.id;
-    $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden");
+    $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
     loadInstalls();
   } catch (e) { if (e.message !== "unauthorized") logout(e.message); }
 }

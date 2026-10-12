@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:">
+<title>BIOSENSE · Documentação da API</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 200 240%27%3E%3Cpath fill=%27%23126C64%27 d=%27M20 12L100 12C160 12 184 66 152 120C118 78 50 66 20 12Z%27/%3E%3Cpath fill=%27%23126C64%27 d=%27M152 120C194 170 176 228 110 228L20 228C54 170 114 163 152 120Z%27/%3E%3Ccircle fill=%27%23126C64%27 cx=%2765%27 cy=%27120%27 r=%2729%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./vendor/swagger-ui.css">
+<style>
+  :root { --primary: #126C64; --primary-soft: #E7F1EF; --bg: #F6F8F7; --text: #121A1D; --text-2: #52615F; --outline: #DCE4E2; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 0 20px; min-height: 60px; background: #fff; border-bottom: 1px solid var(--outline); position: sticky; top: 0; z-index: 10; }
+  header svg { width: 22px; height: 26px; flex: none; }
+  .brand b { display: block; font-size: 17px; letter-spacing: .5px; }
+  .brand small { color: var(--text-2); font-size: 11px; letter-spacing: 1px; }
+  header .spacer { flex: 1; }
+  header a { color: var(--primary); font-weight: 500; text-decoration: none; border: 1px solid var(--primary); border-radius: 8px; padding: 8px 14px; font-size: 14px; }
+  #swagger { max-width: 1200px; margin: 0 auto; padding: 8px 12px 40px; }
+  .swagger-ui { color: var(--text); }
+  .swagger-ui .info .title { color: var(--text); }
+  .swagger-ui .info { margin: 24px 0; }
+  .swagger-ui .scheme-container { background: #fff; box-shadow: none; border: 1px solid var(--outline); border-radius: 12px; }
+  .swagger-ui .btn.authorize { color: var(--primary); border-color: var(--primary); }
+  .swagger-ui .btn.authorize svg { fill: var(--primary); }
+  .swagger-ui .opblock-tag { border-bottom-color: var(--outline); }
+  .swagger-ui a.nostyle, .swagger-ui .info a { color: var(--primary); }
+  .swagger-ui .btn.execute { background: var(--primary); border-color: var(--primary); }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 200 240" aria-hidden="true"><path fill="#126C64" d="M 20 12 L 100 12 C 160 12 184 66 152 120 C 118 78 50 66 20 12 Z"/><path fill="#126C64" d="M 152 120 C 194 170 176 228 110 228 L 20 228 C 54 170 114 163 152 120 Z"/><circle fill="#126C64" cx="65" cy="120" r="29"/></svg>
+  <div class="brand"><b>BIOSENSE</b><small>by DELTABOTS</small></div>
+  <div class="spacer"></div>
+  <a href="/admin/">Voltar ao painel</a>
+</header>
+<div id="swagger"></div>
+<script src="./vendor/swagger-ui-bundle.js"></script>
+<script>
+  "use strict";
+  const ui = SwaggerUIBundle({
+    url: "/v1/openapi.json",
+    dom_id: "#swagger",
+    deepLinking: true,
+    docExpansion: "none",
+    defaultModelsExpandDepth: 0,
+    displayRequestDuration: true,
+    filter: true,
+    tryItOutEnabled: false,
+    persistAuthorization: false,
+    // Reaproveita a chave do painel (mesma aba) para o botão "Try it out".
+    onComplete: () => {
+      let key = "";
+      try { key = sessionStorage.getItem("biosense.admin.key") || ""; } catch { /* sem armazenamento */ }
+      if (key) ui.authActions.authorize({ bearer: { name: "bearer", schema: { type: "http", scheme: "bearer" }, value: key } });
+    },
+  });
+</script>
+</body>
+</html>
