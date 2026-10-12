@@ -30,6 +30,8 @@ export const DeviceItem = z.discriminatedUnion("t", [
   z.object({
     t: z.literal("event"),
     ts,
+    /** Identificador gerado pelo app; reenvios com o mesmo id são ignorados. */
+    id: z.string().min(1).max(64).optional(),
     type: z.string().min(1).max(64),
     data: z.record(z.unknown()).optional(),
   }),
@@ -68,7 +70,8 @@ export const BandInfo = z
 
 export const DeviceMessage = z.union([
   DeviceItem,
-  z.object({ t: z.literal("batch"), items: z.array(DeviceItem).max(500) }),
+  /** `seq` pede confirmação: a nuvem responde {t:"stored", seq} depois de gravar. */
+  z.object({ t: z.literal("batch"), seq: z.number().int().nonnegative().optional(), items: z.array(DeviceItem).max(500) }),
   z.object({
     t: z.literal("hello"),
     client: z

@@ -69,21 +69,27 @@ class CloudMessagesTest {
         assertEquals("wss://x.workers.dev/v1/connect", CloudConfig.toWebSocketUrl("https://x.workers.dev/"))
         assertEquals("wss://x.workers.dev/v1/connect", CloudConfig.toWebSocketUrl("  wss://x.workers.dev/v1/connect "))
         assertEquals("ws://192.168.0.5:8787/v1/connect", CloudConfig.toWebSocketUrl("http://192.168.0.5:8787"))
+        assertEquals("https://x.workers.dev", CloudConfig.toHttpBase("x.workers.dev/"))
+        assertEquals("http://10.0.2.2:8787", CloudConfig.toHttpBase("ws://10.0.2.2:8787/v1/connect"))
         assertNull(CloudConfig.toWebSocketUrl(""))
         assertNull(CloudConfig.toWebSocketUrl("ftp://x"))
-        assertNull(CloudConfig.toWebSocketUrl("https://"))
+        assertNull(CloudConfig.toHttpBase("https://"))
     }
 
     @Test
-    fun configIsUsableOnlyWhenComplete() {
-        assertFalse(CloudConfig(enabled = true, serverUrl = "x.dev", deviceToken = "").isUsable)
-        assertFalse(CloudConfig(enabled = false, serverUrl = "x.dev", deviceToken = "mbd_a").isUsable)
-        assertTrue(CloudConfig(enabled = true, serverUrl = "x.dev", deviceToken = "mbd_a").isUsable)
+    fun eventsCarryUniqueIdsForDeduplication() {
+        val a = CloudMessages.event(1, "BUTTON_PRESSED", "Botão")
+        val b = CloudMessages.event(1, "BUTTON_PRESSED", "Botão")
+        assertTrue(a.getString("id").isNotBlank())
+        assertTrue(a.getString("id") != b.getString("id"))
     }
 
     @Test
-    fun heartRateDefaultsToEvery30Minutes() {
-        assertEquals(30, CloudConfig().hrIntervalMin)
-        assertTrue(CloudConfig.HR_INTERVAL_OPTIONS.contains(0)) // 0 = contínua
+    fun buildsSequencedBatch() {
+        val raw = CloudMessages.batchRaw(7, listOf(CloudMessages.hr(1, 60).toString(), CloudMessages.hr(2, 61).toString()))
+        val json = org.json.JSONObject(raw)
+        assertEquals(7L, json.getLong("seq"))
+        assertEquals(2, json.getJSONArray("items").length())
+        assertEquals(61, json.getJSONArray("items").getJSONObject(1).getInt("bpm"))
     }
 }

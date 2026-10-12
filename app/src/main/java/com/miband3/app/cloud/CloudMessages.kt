@@ -27,8 +27,9 @@ object CloudMessages {
     fun battery(ts: Long, level: Int, charging: Boolean) =
         JSONObject().put("t", "battery").put("ts", ts).put("level", level).put("charging", charging)
 
-    fun event(ts: Long, type: String, description: String) =
-        JSONObject().put("t", "event").put("ts", ts).put("type", type)
+    /** [id] único por evento: a nuvem ignora reenvios do mesmo evento. */
+    fun event(ts: Long, type: String, description: String, id: String = java.util.UUID.randomUUID().toString()) =
+        JSONObject().put("t", "event").put("ts", ts).put("id", id).put("type", type)
             .put("data", JSONObject().put("description", description))
 
     fun state(ts: Long, connection: String, detail: String? = null) =
@@ -63,6 +64,10 @@ object CloudMessages {
             )
 
     fun batch(items: List<JSONObject>) = JSONObject().put("t", "batch").put("items", JSONArray(items))
+
+    /** Lote com número de sequência: a nuvem responde {t:"stored", seq} depois de gravar. */
+    fun batchRaw(seq: Long, items: List<String>): String =
+        """{"t":"batch","seq":$seq,"items":[${items.joinToString(",")}]}"""
 
     fun ack(id: String, ok: Boolean, error: String? = null, result: String? = null) =
         JSONObject().put("t", "ack").put("id", id).put("ok", ok).apply {

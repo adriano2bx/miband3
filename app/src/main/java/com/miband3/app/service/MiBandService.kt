@@ -13,25 +13,21 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.miband3.app.R
-import com.miband3.app.ble.BandState
-import com.miband3.app.ble.Branding
-import com.miband3.app.ble.MiBandManager
 import com.miband3.app.cloud.CloudClient
-import com.miband3.app.cloud.CloudStatus
+import com.miband3.app.status.StatusKind
+import com.miband3.app.status.StatusMonitor
+import com.miband3.app.status.titleRes
 import com.miband3.app.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
- * Serviço em primeiro plano que mantém o processo vivo enquanto a pulseira
- * está conectada, para que eventos e notificações continuem funcionando
- * com o app em segundo plano.
+ * Serviço em primeiro plano que mantém a conexão com a pulseira e a nuvem com a tela
+ * fechada ou bloqueada. A notificação é exigida pelo Android e mostra só o status da
+ * conexão — nenhum dado de saúde e nenhum controle.
  */
 class MiBandService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -40,73 +36,48 @@ class MiBandService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-        } else {
-            0
-        }
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(MiBandManager.state.value), type)
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(StatusMonitor.status.value), type)
         scope.launch {
-            MiBandManager.state
-                .combine(CloudClient.state.map { it.status }.distinctUntilChanged()) { s, cloud -> listOf(s.connection, s.battery, s.steps, cloud) }
-                .distinctUntilChanged()
-                .collect {
-                    getSystemService(NotificationManager::class.java)
-                        .notify(NOTIFICATION_ID, buildNotification(MiBandManager.state.value))
-                }
+            StatusMonitor.status.collect { status ->
+                getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(status))
+            }
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_DISCONNECT) {
-            MiBandManager.disconnect()
-            // Com o envio à nuvem ligado o serviço continua para manter o WebSocket vivo.
-            if (!CloudClient.isUsable) stopSelf()
-        }
-        return START_STICKY
-    }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun buildNotification(state: BandState): Notification {
+    private fun buildNotification(status: StatusKind): Notification {
         val openApp = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val disconnect = PendingIntent.getService(
-            this, 1, Intent(this, MiBandService::class.java).setAction(ACTION_DISCONNECT),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val cloud = CloudClient.state.value
-        val details = buildList {
-            state.battery?.let { add("Bateria $it%") }
-            state.steps?.let { add("$it passos") }
-            if (cloud.status != CloudStatus.DISABLED) add("Nuvem: ${cloud.status.label}")
-        }.joinToString(" · ")
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_band)
-            .setContentTitle("${state.name ?: Branding.PRODUCT_NAME}: ${state.connection.label}")
-            .setContentText(details.ifEmpty { null })
+            .setSmallIcon(R.drawable.ic_stat_biosense)
+            .setContentTitle(getString(R.string.brand_name))
+            .setContentText(getString(status.titleRes()))
             .setContentIntent(openApp)
-            .addAction(0, "Desconectar", disconnect)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
     companion object {
         const val CHANNEL_ID = "connection"
         private const val NOTIFICATION_ID = 1
-        private const val ACTION_DISCONNECT = "com.miband3.app.DISCONNECT"
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, MiBandService::class.java))
         }
 
         fun stop(context: Context) {
+            // Com a instalação ativa o serviço continua: é ele que mantém o monitoramento vivo.
             if (CloudClient.isUsable) return
             context.stopService(Intent(context, MiBandService::class.java))
         }

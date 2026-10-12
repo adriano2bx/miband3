@@ -1,3 +1,8 @@
 <resources>
-    <color name="ic_launcher_background">#FF1E2A3A</color>
+    <!-- Tokens BIOSENSE (design/tokens.json v1.0). -->
+    <color name="biosense_primary">#FF126C64</color>
+    <color name="biosense_background">#FFF6F8F7</color>
+    <color name="biosense_surface">#FFFFFFFF</color>
+    <color name="biosense_text_primary">#FF121A1D</color>
+    <color name="ic_launcher_background">#FFF6F8F7</color>
 </resources>

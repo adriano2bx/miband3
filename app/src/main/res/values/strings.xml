@@ -1,5 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Biosense Pulse</string>
-    <string name="notification_access_label">Encaminhar notificações para a Biosense Pulse</string>
-    <string name="channel_connection">Conexão com a pulseira</string>
+    <!-- Marca -->
+    <string name="app_name">BIOSENSE</string>
+    <string name="brand_name">BIOSENSE</string>
+    <string name="brand_signature">by DELTABOTS</string>
+    <string name="footer">Deltabots · BIOSENSE</string>
+    <string name="channel_connection">Conexão do monitoramento</string>
+
+    <!-- Ações comuns -->
+    <string name="action_back">Voltar</string>
+    <string name="action_continue">Continuar</string>
+    <string name="action_retry">Tentar novamente</string>
+    <string name="state_done">Concluído</string>
+    <string name="state_failed">Falhou</string>
+    <string name="state_pending">Pendente</string>
+
+    <!-- Textos institucionais -->
+    <string name="ownership_short">Aplicativo e pulseira de propriedade da Deltabots.</string>
+    <string name="ownership_full">Este aplicativo e a pulseira disponibilizada são de propriedade da Deltabots.</string>
+    <string name="responsible_label">Responsável</string>
+    <string name="responsible_name">Adriano de Oliveira Maria</string>
+
+    <!-- 02 Consentimento -->
+    <string name="consent_title">Participação voluntária</string>
+    <string name="consent_subtitle">Conheça o programa antes de continuar.</string>
+    <string name="consent_program_title">IA e Bioconexões</string>
+    <string name="consent_program_text">Você está sendo convidado a participar das pesquisas avançadas da Deltabots.</string>
+    <string name="consent_data_title">Dados coletados</string>
+    <string name="consent_data_text">Sinais e registros da pulseira, como frequência cardíaca, atividade e sono.</string>
+    <string name="consent_use_title">Uso dos dados</string>
+    <string name="consent_use_text">Os dados são enviados à plataforma para análises e estudos com inteligência artificial.</string>
+    <string name="consent_choice_title">Sua escolha</string>
+    <string name="consent_choice_text">A participação é voluntária. Você pode solicitar a retirada do programa.</string>
+    <string name="consent_read_term">Ler termo completo (versão %1$s)</string>
+    <string name="consent_term_loading">Carregando o termo…</string>
+    <string name="consent_checkbox">Li o termo e concordo em participar.</string>
+    <string name="consent_accept">Concordar e continuar</string>
+    <string name="consent_decline">Não participar</string>
+    <string name="consent_term_unavailable_title">Termo indisponível</string>
+    <string name="consent_term_not_published">O termo de participação ainda não foi publicado pela equipe responsável. Não é possível aderir por enquanto.</string>
+    <string name="consent_term_network">Sem conexão com o serviço. Verifique a internet e tente novamente.</string>
+    <string name="consent_term_not_configured">Esta versão do aplicativo não tem o endereço do serviço configurado. Solicite apoio da equipe técnica.</string>
+    <string name="consent_term_server">O serviço não respondeu como esperado. Tente novamente em instantes.</string>
+    <string name="consent_error_title">Adesão não registrada</string>
+    <string name="consent_error_network">Sem conexão. Sua resposta não foi registrada; tente novamente.</string>
+    <string name="consent_error_term_updated">O termo foi atualizado. Leia a nova versão antes de concordar.</string>
+    <string name="consent_error_server">O serviço não confirmou o registro. Tente novamente.</string>
+    <string name="term_version">Versão %1$s</string>
+
+    <string name="declined_title">Participação não iniciada</string>
+    <string name="declined_subtitle">Você escolheu não participar.</string>
+    <string name="declined_text">Nenhum dado da pulseira é coletado ou enviado. Se mudar de ideia, você pode rever o termo de participação.</string>
+    <string name="declined_review">Rever termo</string>
+
+    <!-- 03-05 Tutorial -->
+    <string name="setup_step_of">Etapa %1$d de %2$d</string>
+    <string name="setup_allow_continue">Permitir e continuar</string>
+    <string name="setup_open_settings">Abrir configurações do aplicativo</string>
+    <string name="setup1_title">Prepare a conexão</string>
+    <string name="setup1_subtitle">Mantenha a pulseira próxima ao celular.</string>
+    <string name="setup1_bt_title">Bluetooth</string>
+    <string name="setup1_bt_text">Ative o Bluetooth do celular.</string>
+    <string name="setup1_bt_on">Bluetooth ativado.</string>
+    <string name="setup1_perm_title">Permissão de conexão</string>
+    <string name="setup1_perm_text">Permita o acesso a dispositivos próximos.</string>
+    <string name="setup1_perm_granted">Permissão concedida.</string>
+    <string name="setup1_hint">Uma solicitação do Android será exibida quando necessário.</string>
+    <string name="setup1_denied_title">Permissão necessária</string>
+    <string name="setup1_denied_text">Sem a permissão de dispositivos próximos o aplicativo não consegue encontrar a pulseira. Toque em “Permitir e continuar” para tentar de novo.</string>
+    <string name="setup1_denied_permanent">A permissão foi negada e o Android não vai perguntar novamente. Abra as configurações do aplicativo, entre em Permissões e permita “Dispositivos próximos”.</string>
+
+    <string name="setup2_title">Encontre sua pulseira</string>
+    <string name="setup2_subtitle">Selecione a pulseira disponibilizada pela equipe.</string>
+    <string name="setup2_searching">Buscando dispositivos próximos…</string>
+    <string name="setup2_none_title">Nenhuma pulseira encontrada</string>
+    <string name="setup2_none_text">Aproxime a pulseira do celular, confira se ela tem bateria e busque novamente.</string>
+    <string name="setup2_device_id">Identificação: final %1$s</string>
+    <string name="setup2_confirm_hint">Confirme com o técnico qual pulseira selecionar.</string>
+    <string name="setup2_connect">Conectar pulseira</string>
+    <string name="setup2_rescan">Buscar novamente</string>
+
+    <string name="setup3_title">Confirme na pulseira</string>
+    <string name="setup3_subtitle_wait">Mantenha a pulseira próxima enquanto a conexão é feita.</string>
+    <string name="setup3_subtitle_tap">Toque na tela da pulseira quando ela vibrar.</string>
+    <string name="setup3_subtitle_done">A pulseira foi autenticada.</string>
+    <string name="setup3_illustration">Ilustração: toque na tela da pulseira</string>
+    <string name="setup3_band_title">Pulseira autenticada</string>
+    <string name="setup3_band_connecting">Conectando à pulseira…</string>
+    <string name="setup3_band_authenticating">Autenticando…</string>
+    <string name="setup3_band_tap">Aguardando o toque na pulseira…</string>
+    <string name="setup3_band_done">Autenticação concluída.</string>
+    <string name="setup3_band_timeout">Tempo esgotado sem resposta da pulseira.</string>
+    <string name="setup3_band_failed">Não foi possível autenticar a pulseira.</string>
+    <string name="setup3_failed_help">Confirme se é a pulseira indicada pela equipe e se ela não está vinculada a outro aplicativo. Tente novamente ou solicite apoio da equipe técnica.</string>
+    <string name="setup3_service_title">Serviço conectado</string>
+    <string name="setup3_service_connecting">Conectando ao serviço…</string>
+    <string name="setup3_service_done">Conexão com o serviço confirmada.</string>
+    <string name="setup3_service_pending_authorization">Conectado. Aguardando autorização da equipe técnica.</string>
+    <string name="setup3_service_unavailable">Serviço indisponível. A instalação pode ser concluída quando a conexão for restabelecida.</string>
+    <string name="setup3_ready">Conexão concluída. Seu dispositivo está pronto.</string>
+    <string name="setup3_finish">Concluir instalação</string>
+    <string name="setup3_choose_another">Escolher outra pulseira</string>
+
+    <!-- 06 Principal -->
+    <string name="main_status_section">Status do dispositivo</string>
+    <string name="main_program_section">Participação no programa</string>
+    <string name="main_participant_title">Participante voluntário</string>
+    <string name="main_participant_text">Você participa voluntariamente da Divisão de Pesquisas Avançadas em IA e Bioconexões da Deltabots.</string>
+    <string name="status_active_title">Conexão ativa</string>
+    <string name="status_active_message">Pulseira e serviço conectados.</string>
+    <string name="status_reconnecting_title">Reconectando</string>
+    <string name="status_reconnecting_message">A conexão está sendo restabelecida.</string>
+    <string name="status_band_disconnected_title">Pulseira desconectada</string>
+    <string name="status_band_disconnected_message">Mantenha a pulseira próxima e o Bluetooth ligado.</string>
+    <string name="status_bluetooth_off_title">Bluetooth desativado</string>
+    <string name="status_bluetooth_off_message">Ative o Bluetooth nas configurações do celular.</string>
+    <string name="status_service_unavailable_title">Serviço indisponível</string>
+    <string name="status_service_unavailable_message">Aguardando conexão com o serviço.</string>
+    <string name="status_permission_title">Permissão necessária</string>
+    <string name="status_permission_message">O aplicativo precisa da permissão de conexão.</string>
+    <string name="status_not_authorized_title">Conexão não autorizada</string>
+    <string name="status_not_authorized_message">Solicite apoio da equipe técnica.</string>
+
+    <!-- 07 Login técnico -->
+    <string name="tech_tag">Área técnica</string>
+    <string name="tech_login_title">Acesso técnico</string>
+    <string name="tech_login_subtitle">Entre com sua credencial Deltabots.</string>
+    <string name="tech_credential">Credencial</string>
+    <string name="tech_credential_hint">Identificação do técnico</string>
+    <string name="tech_password">Senha</string>
+    <string name="tech_show_password">Mostrar senha</string>
+    <string name="tech_hide_password">Ocultar senha</string>
+    <string name="tech_submit">Validar e entrar</string>
+    <string name="tech_cloud_note">A credencial será validada em nuvem.</string>
+    <string name="tech_validating">Validando na nuvem…</string>
+    <string name="tech_restricted">Acesso restrito à equipe técnica.</string>
+    <string name="tech_back_main">Voltar à tela principal</string>
+    <string name="tech_error_title">Acesso não liberado</string>
+    <string name="tech_error_invalid">Credencial ou senha incorretas.</string>
+    <string name="tech_error_invalid_left">Credencial ou senha incorretas. Tentativas restantes: %1$d.</string>
+    <string name="tech_error_locked">Muitas tentativas. O acesso foi bloqueado temporariamente; tente mais tarde.</string>
+    <string name="tech_error_network">Sem conexão com o serviço. A credencial só pode ser validada online.</string>
+    <string name="tech_error_no_installation">Este celular não tem uma instalação válida para acesso técnico.</string>
+    <string name="tech_error_rejected">O serviço recusou o acesso. Tente novamente.</string>
+    <string name="tech_session_expired">A sessão técnica expirou. Entre novamente.</string>
+
+    <!-- 08 Área técnica -->
+    <string name="tech_area_label">Área técnica</string>
+    <string name="tech_area_title">Configuração e testes</string>
+    <string name="tech_tab_config">Configuração</string>
+    <string name="tech_tab_tests">Testes</string>
+    <string name="tech_end_session">Encerrar sessão técnica</string>
+    <string name="tech_loading_config">Carregando configuração da nuvem…</string>
+    <string name="tech_config_failed">Configuração indisponível</string>
+    <string name="tech_installation_card">Instalação</string>
+    <string name="tech_device">Dispositivo</string>
+    <string name="tech_installation_id">Instalação</string>
+    <string name="tech_participant">Participante</string>
+    <string name="tech_participant_none">Não vinculado</string>
+    <string name="tech_authorization">Autorização</string>
+    <string name="tech_auth_active">Autorizada</string>
+    <string name="tech_auth_pending">Pendente</string>
+    <string name="tech_auth_revoked">Bloqueada</string>
+    <string name="tech_consent">Consentimento</string>
+    <string name="tech_consent_valid">Válido (versão %1$s)</string>
+    <string name="tech_consent_invalid">Pendente (vigente: %1$s)</string>
+    <string name="tech_service">Serviço</string>
+    <string name="tech_service_online">Conectado</string>
+    <string name="tech_service_connecting">Conectando</string>
+    <string name="tech_service_rejected">Não autorizado</string>
+    <string name="tech_service_disabled">Desligado</string>
+    <string name="tech_band_state">Pulseira</string>
+    <string name="tech_technician">Técnico</string>
+    <string name="tech_profile_card">Perfil de coleta (definido em nuvem)</string>
+    <string name="tech_profile_hr">Frequência cardíaca</string>
+    <string name="tech_profile_history">Histórico da pulseira</string>
+    <string name="tech_profile_version">Versão</string>
+    <string name="tech_profile_updated">Atualizado em</string>
+    <string name="tech_profile_synced">Sincronizado em</string>
+    <string name="tech_every_min">A cada %1$d min</string>
+    <string name="tech_hr_continuous">Contínua</string>
+    <string name="tech_sync_config">Sincronizar configuração</string>
+    <string name="tech_authorize_title">Vincular participante</string>
+    <string name="tech_authorize_text">Esta instalação aguarda autorização. Informe a referência do participante (código, não o nome) para autorizar a coleta.</string>
+    <string name="tech_authorize_no_scope">Esta instalação aguarda autorização. Seu acesso não permite autorizar; solicite à coordenação.</string>
+    <string name="tech_participant_ref">Referência do participante</string>
+    <string name="tech_authorize_action">Autorizar instalação</string>
+    <string name="tech_authorize_forbidden">Seu acesso não permite autorizar instalações.</string>
+    <string name="tech_current_config">Configuração atual</string>
+    <string name="tech_collection">Coleta</string>
+    <string name="tech_collection_value">FC: %1$s</string>
+    <string name="tech_collection_unknown">Perfil definido em nuvem</string>
+    <string name="tech_tests_title">Testes do dispositivo</string>
+    <string name="tech_log_title">Registro de testes</string>
+    <string name="tech_log_empty">Nenhum teste nesta sessão.</string>
+
+    <string name="test_bluetooth">Bluetooth</string>
+    <string name="test_vibration">Vibração</string>
+    <string name="test_heart_rate">Frequência cardíaca</string>
+    <string name="test_history">Histórico</string>
+    <string name="test_cloud">Comunicação com a nuvem</string>
+    <string name="test_action_check">Verificar</string>
+    <string name="test_action_test">Testar</string>
+    <string name="test_action_measure">Medir</string>
+    <string name="test_action_sync">Sincronizar</string>
+    <string name="test_state_running">Executando…</string>
+    <string name="test_state_unsupported">Recurso não suportado</string>
+    <string name="test_band_not_ready">Pulseira não autenticada</string>
+    <string name="test_no_response">Sem resposta no tempo limite</string>
+    <string name="test_bt_no_permission">Permissão de Bluetooth não concedida</string>
+    <string name="test_bt_off">Bluetooth do celular desligado</string>
+    <string name="test_bt_ok">Leitura BLE concluída (bateria %1$d%%)</string>
+    <string name="test_vibration_written">Comando escrito na pulseira. Confirme visualmente se ela vibrou.</string>
+    <string name="test_write_failed">A pulseira não aceitou a escrita</string>
+    <string name="test_hr_ok">%1$d bpm às %2$s</string>
+    <string name="test_hr_timeout">Sem leitura em 45 s. Verifique se a pulseira está firme no pulso.</string>
+    <string name="test_history_ok">Histórico recebido: %1$s</string>
+    <string name="test_cloud_ok">Serviço respondeu: REST %1$d ms, conexão do app %2$d ms</string>
+    <string name="test_cloud_ws_down">REST respondeu (%1$d ms), mas a conexão do app com o serviço não está ativa</string>
+
+    <string name="log_config_synced">Configuração sincronizada (versão %1$d)</string>
+    <string name="log_config_failed">Falha ao sincronizar configuração</string>
+    <string name="log_authorized">Instalação autorizada</string>
 </resources>

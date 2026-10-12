@@ -8,6 +8,7 @@ import { ALL_SCOPES, H_DEVICE, H_DEVICES, H_PRINCIPAL, H_ROLE, type Scope } from
 import { newId, parseJson, parseTime, randomToken, sha256Hex } from "./util";
 import { deliverOne, WEBHOOK_EVENTS } from "./webhooks";
 import { openapi } from "./openapi";
+import { participantApi } from "./participant-api";
 
 export const api = new Hono<AppEnv>();
 
@@ -121,6 +122,7 @@ const deviceRoute = (...scopes: Scope[]): MiddlewareHandler<AppEnv> => {
 
 api.get("/v1/health", (c) => c.json({ ok: true, time: Date.now() }));
 api.get("/v1/openapi.json", (c) => c.json(openapi(new URL(c.req.url).origin)));
+api.route("/", participantApi);
 
 // ====================================================================== conexão do app
 
@@ -128,8 +130,9 @@ api.get("/v1/connect", async (c) => {
   if (c.req.header("upgrade") !== "websocket") return c.json({ error: "bad_request", message: "Esperado WebSocket." }, 426);
   const token = c.req.header("authorization")?.replace(/^bearer /i, "") ?? c.req.query("access_token");
   if (!token?.startsWith("mbd_")) return c.json({ error: "unauthorized", message: "Token de dispositivo (mbd_…) ausente." }, 401);
-  const row = await c.env.DB.prepare("SELECT id FROM devices WHERE token_hash = ? AND archived_at IS NULL").bind(await sha256Hex(token)).first<{ id: string }>();
+  const row = await c.env.DB.prepare("SELECT id, status FROM devices WHERE token_hash = ? AND archived_at IS NULL").bind(await sha256Hex(token)).first<{ id: string; status: string }>();
   if (!row) return c.json({ error: "unauthorized", message: "Token de dispositivo inválido." }, 401);
+  if (row.status === "revoked") return c.json({ error: "forbidden", message: "Instalação não autorizada." }, 403);
 
   const headers = new Headers(c.req.raw.headers);
   headers.set(H_ROLE, "device");

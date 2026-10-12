@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wordmark BIOSENSE / by DELTABOTS (contornos do pacote de marca v1, sem o símbolo). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp" android:height="60dp"
+    android:viewportWidth="480" android:viewportHeight="144">
+    <group android:translateX="-225" android:translateY="-62">
+        <group android:translateX="230.000" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M403 713V166H727Q890 166 968.5 233.5Q1047 301 1047 440Q1047 580 968.5 646.5Q890 713 727 713ZM403 1327V877H702Q850 877 922.5 932.5Q995 988 995 1102Q995 1215 922.5 1271.0Q850 1327 702 1327ZM201 1493H717Q948 1493 1073.0 1397.0Q1198 1301 1198 1124Q1198 987 1134.0 906.0Q1070 825 946 805Q1095 773 1177.5 671.5Q1260 570 1260 418Q1260 218 1124.0 109.0Q988 0 737 0H201Z" />
+        </group>
+        <group android:translateX="293.115" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M201 1493H403V0H201Z" />
+        </group>
+        <group android:translateX="320.248" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M807 1356Q587 1356 457.5 1192.0Q328 1028 328 745Q328 463 457.5 299.0Q587 135 807 135Q1027 135 1155.5 299.0Q1284 463 1284 745Q1284 1028 1155.5 1192.0Q1027 1356 807 1356ZM807 1520Q1121 1520 1309.0 1309.5Q1497 1099 1497 745Q1497 392 1309.0 181.5Q1121 -29 807 -29Q492 -29 303.5 181.0Q115 391 115 745Q115 1099 303.5 1309.5Q492 1520 807 1520Z" />
+        </group>
+        <group android:translateX="392.662" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M1096 1444V1247Q981 1302 879.0 1329.0Q777 1356 682 1356Q517 1356 427.5 1292.0Q338 1228 338 1110Q338 1011 397.5 960.5Q457 910 623 879L745 854Q971 811 1078.5 702.5Q1186 594 1186 412Q1186 195 1040.5 83.0Q895 -29 614 -29Q508 -29 388.5 -5.0Q269 19 141 66V274Q264 205 382.0 170.0Q500 135 614 135Q787 135 881.0 203.0Q975 271 975 397Q975 507 907.5 569.0Q840 631 686 662L563 686Q337 731 236.0 827.0Q135 923 135 1094Q135 1292 274.5 1406.0Q414 1520 659 1520Q764 1520 873.0 1501.0Q982 1482 1096 1444Z" />
+        </group>
+        <group android:translateX="451.061" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M201 1493H1145V1323H403V881H1114V711H403V170H1163V0H201Z" />
+        </group>
+        <group android:translateX="509.189" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M201 1493H473L1135 244V1493H1331V0H1059L397 1249V0H201Z" />
+        </group>
+        <group android:translateX="578.010" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M1096 1444V1247Q981 1302 879.0 1329.0Q777 1356 682 1356Q517 1356 427.5 1292.0Q338 1228 338 1110Q338 1011 397.5 960.5Q457 910 623 879L745 854Q971 811 1078.5 702.5Q1186 594 1186 412Q1186 195 1040.5 83.0Q895 -29 614 -29Q508 -29 388.5 -5.0Q269 19 141 66V274Q264 205 382.0 170.0Q500 135 614 135Q787 135 881.0 203.0Q975 271 975 397Q975 507 907.5 569.0Q840 631 686 662L563 686Q337 731 236.0 827.0Q135 923 135 1094Q135 1292 274.5 1406.0Q414 1520 659 1520Q764 1520 873.0 1501.0Q982 1482 1096 1444Z" />
+        </group>
+        <group android:translateX="636.408" android:translateY="132" android:scaleX="0.0449219" android:scaleY="-0.0449219">
+            <path android:fillColor="#121A1D" android:pathData="M201 1493H1145V1323H403V881H1114V711H403V170H1163V0H201Z" />
+        </group>
+        <group android:translateX="235.000" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M997 559Q997 762 913.5 877.5Q830 993 684 993Q538 993 454.5 877.5Q371 762 371 559Q371 356 454.5 240.5Q538 125 684 125Q830 125 913.5 240.5Q997 356 997 559ZM371 950Q429 1050 517.5 1098.5Q606 1147 729 1147Q933 1147 1060.5 985.0Q1188 823 1188 559Q1188 295 1060.5 133.0Q933 -29 729 -29Q606 -29 517.5 19.5Q429 68 371 168V0H186V1556H371Z" />
+        </group>
+        <group android:translateX="254.043" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M659 -104Q581 -304 507.0 -365.0Q433 -426 309 -426H162V-272H270Q346 -272 388.0 -236.0Q430 -200 481 -66L514 18L61 1120H256L606 244L956 1120H1151Z" />
+        </group>
+        <group android:translateX="281.333" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M403 1327V166H647Q956 166 1099.5 306.0Q1243 446 1243 748Q1243 1048 1099.5 1187.5Q956 1327 647 1327ZM201 1493H616Q1050 1493 1253.0 1312.5Q1456 1132 1456 748Q1456 362 1252.0 181.0Q1048 0 616 0H201Z" />
+        </group>
+        <group android:translateX="304.434" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M201 1493H1145V1323H403V881H1114V711H403V170H1163V0H201Z" />
+        </group>
+        <group android:translateX="323.389" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M201 1493H403V170H1130V0H201Z" />
+        </group>
+        <group android:translateX="340.103" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M-6 1493H1257V1323H727V0H524V1323H-6Z" />
+        </group>
+        <group android:translateX="358.428" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M700 1294 426 551H975ZM586 1493H815L1384 0H1174L1038 383H365L229 0H16Z" />
+        </group>
+        <group android:translateX="378.950" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M403 713V166H727Q890 166 968.5 233.5Q1047 301 1047 440Q1047 580 968.5 646.5Q890 713 727 713ZM403 1327V877H702Q850 877 922.5 932.5Q995 988 995 1102Q995 1215 922.5 1271.0Q850 1327 702 1327ZM201 1493H717Q948 1493 1073.0 1397.0Q1198 1301 1198 1124Q1198 987 1134.0 906.0Q1070 825 946 805Q1095 773 1177.5 671.5Q1260 570 1260 418Q1260 218 1124.0 109.0Q988 0 737 0H201Z" />
+        </group>
+        <group android:translateX="399.531" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M807 1356Q587 1356 457.5 1192.0Q328 1028 328 745Q328 463 457.5 299.0Q587 135 807 135Q1027 135 1155.5 299.0Q1284 463 1284 745Q1284 1028 1155.5 1192.0Q1027 1356 807 1356ZM807 1520Q1121 1520 1309.0 1309.5Q1497 1099 1497 745Q1497 392 1309.0 181.5Q1121 -29 807 -29Q492 -29 303.5 181.0Q115 391 115 745Q115 1099 303.5 1309.5Q492 1520 807 1520Z" />
+        </group>
+        <group android:translateX="423.145" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M-6 1493H1257V1323H727V0H524V1323H-6Z" />
+        </group>
+        <group android:translateX="441.470" android:translateY="190" android:scaleX="0.0146484" android:scaleY="-0.0146484">
+            <path android:fillColor="#121A1D" android:pathData="M1096 1444V1247Q981 1302 879.0 1329.0Q777 1356 682 1356Q517 1356 427.5 1292.0Q338 1228 338 1110Q338 1011 397.5 960.5Q457 910 623 879L745 854Q971 811 1078.5 702.5Q1186 594 1186 412Q1186 195 1040.5 83.0Q895 -29 614 -29Q508 -29 388.5 -5.0Q269 19 141 66V274Q264 205 382.0 170.0Q500 135 614 135Q787 135 881.0 203.0Q975 271 975 397Q975 507 907.5 569.0Q840 631 686 662L563 686Q337 731 236.0 827.0Q135 923 135 1094Q135 1292 274.5 1406.0Q414 1520 659 1520Q764 1520 873.0 1501.0Q982 1482 1096 1444Z" />
+        </group>
+    </group>
+</vector>

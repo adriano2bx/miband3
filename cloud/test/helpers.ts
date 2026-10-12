@@ -47,8 +47,22 @@ export async function openSocket(path: string, token: string): Promise<Sock> {
   return new Sock(res.webSocket);
 }
 
+export const TERM_VERSION = "2026.1";
+
+/** Publica (uma vez) o termo de teste. */
+export async function ensureTerm() {
+  const r = await call("POST", "/v1/consent/terms", {
+    body: { version: TERM_VERSION, title: "Termo de participação (teste)", content: "Conteúdo de teste do termo de participação, apenas para os testes automatizados." },
+  });
+  if (r.status !== 201 && r.status !== 409) throw new Error(JSON.stringify(r));
+}
+
+/** Cria uma pulseira autorizada e com consentimento válido (pronta para enviar telemetria). */
 export async function newDevice(name = "Paciente Teste") {
   const r = await call("POST", "/v1/devices", { body: { name, patient_ref: `ref-${name}` } });
   if (r.status !== 201) throw new Error(JSON.stringify(r));
+  await ensureTerm();
+  const consent = await call("POST", "/v1/consent", { token: r.json.device_token, body: { version: TERM_VERSION, accepted: true } });
+  if (consent.status !== 200) throw new Error(JSON.stringify(consent));
   return { id: r.json.id as string, token: r.json.device_token as string };
 }

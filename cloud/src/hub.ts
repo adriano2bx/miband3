@@ -5,6 +5,7 @@ import { DeviceMessage, ViewerMessage, type DeviceItem } from "./protocol";
 import { H_DEVICE, H_DEVICES, H_PRINCIPAL, H_ROLE, type Env } from "./types";
 import { newId, parseJson } from "./util";
 import { deliverWebhooks, type WebhookEvent } from "./webhooks";
+import { currentTerm, installationView, type DeviceRowLite } from "./participants";
 
 type Role = "device" | "viewer";
 
@@ -16,6 +17,8 @@ interface Attachment {
   allowed: string[] | null;
   /** Tipos assinados; null = todos. */
   types: string[] | null;
+  /** Só para o app: instalação autorizada e com consentimento válido (pode enviar telemetria). */
+  accepting?: boolean;
 }
 
 interface Latest {
@@ -128,6 +131,45 @@ export class DeviceHub extends DurableObject<Env> {
     return this.snapshot(deviceId);
   }
 
+  /** Autorização, consentimento ou perfil de coleta mudaram: avisa o app conectado. */
+  async refresh(deviceId: string): Promise<void> {
+    await this.ctx.storage.put("deviceId", deviceId);
+    const status = await this.installationStatus(deviceId);
+    for (const ws of this.ctx.getWebSockets("device")) {
+      if (!status || status.revoked) {
+        ws.close(4003, "Instalação não autorizada");
+        continue;
+      }
+      this.setAccepting(ws, status.accepting);
+      this.reply(ws, { t: "status", server_time: Date.now(), ...status.payload });
+    }
+  }
+
+  private async installationStatus(deviceId: string) {
+    const d = await this.env.DB.prepare("SELECT * FROM devices WHERE id = ? AND archived_at IS NULL").bind(deviceId).first<DeviceRowLite>();
+    if (!d) return null;
+    const view = installationView(d, await currentTerm(this.env.DB));
+    return {
+      revoked: d.status === "revoked",
+      accepting: view.authorized && view.consent.valid,
+      payload: {
+        status: view.status,
+        authorized: view.authorized,
+        consent: view.consent,
+        config: view.config,
+        config_version: view.config_version,
+        config_updated_at: view.config_updated_at,
+      },
+    };
+  }
+
+  private setAccepting(ws: WebSocket, accepting: boolean): void {
+    const att = ws.deserializeAttachment() as Attachment | null;
+    if (!att) return;
+    att.accepting = accepting;
+    ws.serializeAttachment(att);
+  }
+
   /** Encerra o socket do app (por exemplo, ao rotacionar o token). */
   async kick(reason: string): Promise<void> {
     for (const ws of this.ctx.getWebSockets("device")) ws.close(4001, reason);
@@ -137,7 +179,9 @@ export class DeviceHub extends DurableObject<Env> {
 
   private async onDeviceConnected(deviceId: string, ws: WebSocket): Promise<void> {
     await this.setOnline(deviceId, true);
-    ws.send(JSON.stringify({ t: "welcome", device_id: deviceId, server_time: Date.now() }));
+    const status = await this.installationStatus(deviceId);
+    this.setAccepting(ws, status?.accepting ?? false);
+    ws.send(JSON.stringify({ t: "welcome", device_id: deviceId, server_time: Date.now(), ...(status?.payload ?? {}) }));
     // Comandos que ficaram na fila enquanto o app estava offline.
     const now = Date.now();
     await this.env.DB.prepare("UPDATE commands SET status = 'expired' WHERE device_id = ? AND status = 'queued' AND expires_at < ?")
@@ -171,9 +215,19 @@ export class DeviceHub extends DurableObject<Env> {
       }
       case "ack":
         return this.onAck(att.deviceId, msg);
-      case "batch":
-        return this.ingest(att.deviceId, msg.items);
+      case "batch": {
+        if (!att.accepting) {
+          // Sem autorização ou sem consentimento válido: nada é gravado nem repassado.
+          if (msg.seq !== undefined) this.reply(ws, { t: "stored", seq: msg.seq, accepted: false, reason: "not_authorized" });
+          return;
+        }
+        await this.ingest(att.deviceId, msg.items);
+        // Só confirma depois de gravado no D1: o app então descarta os itens da fila local.
+        if (msg.seq !== undefined) this.reply(ws, { t: "stored", seq: msg.seq, accepted: true, count: msg.items.length });
+        return;
+      }
       default:
+        if (!att.accepting) return this.reply(ws, { t: "error", error: "Instalação sem autorização ou consentimento válido." });
         return this.ingest(att.deviceId, [msg]);
     }
   }
@@ -196,7 +250,8 @@ export class DeviceHub extends DurableObject<Env> {
     const db = this.env.DB;
     const stmts: D1PreparedStatement[] = [];
     const latest = (await this.ctx.storage.get<Latest>("latest")) ?? {};
-    const outgoing: Array<{ type: string; payload: Record<string, unknown> }> = [];
+    const outgoing: Array<{ type: string; payload: Record<string, unknown>; when?: () => boolean }> = [];
+    const results: D1Result[] = [];
     const checks: Array<() => Promise<void>> = [];
 
     for (const item of items) {
@@ -232,14 +287,17 @@ export class DeviceHub extends DurableObject<Env> {
         }
         case "event": {
           const ts = clamp(item.ts);
+          const index = stmts.length;
           stmts.push(
-            db.prepare("INSERT INTO events (device_id, ts, type, data) VALUES (?, ?, ?, ?)")
-              .bind(deviceId, ts, item.type, item.data ? JSON.stringify(item.data) : null),
+            db.prepare("INSERT OR IGNORE INTO events (device_id, ts, type, data, client_id) VALUES (?, ?, ?, ?, ?)")
+              .bind(deviceId, ts, item.type, item.data ? JSON.stringify(item.data) : null, item.id ?? null),
           );
           latest.lastEvent = { ts, type: item.type };
-          outgoing.push({ type: "event", payload: { ts, type: item.type, data: item.data ?? null } });
-          checks.push(() => this.evaluateEvent(deviceId, item.type, ts));
-          checks.push(() => this.webhook("event.created", deviceId, { ts, type: item.type, data: item.data ?? null }));
+          // Reenvio de um evento já gravado (mesmo id): não repete alerta, webhook nem transmissão.
+          const fresh = () => (results[index]?.meta?.changes ?? 1) > 0;
+          outgoing.push({ type: "event", payload: { ts, type: item.type, data: item.data ?? null }, when: fresh });
+          checks.push(() => (fresh() ? this.evaluateEvent(deviceId, item.type, ts) : Promise.resolve()));
+          checks.push(() => (fresh() ? this.webhook("event.created", deviceId, { ts, type: item.type, data: item.data ?? null }) : Promise.resolve()));
           break;
         }
         case "activity": {
@@ -262,10 +320,10 @@ export class DeviceHub extends DurableObject<Env> {
 
     if (stmts.length) {
       // D1 limita ~100 comandos por batch; fatiamos para segurança.
-      for (let i = 0; i < stmts.length; i += 90) await db.batch(stmts.slice(i, i + 90));
+      for (let i = 0; i < stmts.length; i += 90) results.push(...(await db.batch(stmts.slice(i, i + 90))));
     }
     await this.ctx.storage.put("latest", latest);
-    for (const o of outgoing) await this.broadcast(deviceId, o.type, { t: o.type, ...o.payload });
+    for (const o of outgoing) if (!o.when || o.when()) await this.broadcast(deviceId, o.type, { t: o.type, ...o.payload });
     for (const check of checks) await check();
   }
 

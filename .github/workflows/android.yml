@@ -16,13 +16,16 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - name: Testes unitários
-        run: ./gradlew testPadraoDebugUnitTest
+        run: ./gradlew testDebugUnitTest
       - name: Gerar APK
+        # Endereço do serviço: variável do repositório BIOSENSE_CLOUD_URL (Settings > Variables).
+        env:
+          BIOSENSE_CLOUD_URL: ${{ vars.BIOSENSE_CLOUD_URL }}
         run: ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: miband3-debug-apk
-          path: app/build/outputs/apk/*/debug/*.apk
+          name: biosense-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
 
   cloud:
     runs-on: ubuntu-latest

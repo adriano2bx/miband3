@@ -63,6 +63,31 @@ const routes: Record<string, Record<string, Op>> = {
     post: { summary: "Cria chave (escopos read/command/manage/admin; opcionalmente restrita a pulseiras).", scope: "admin", tag: "Chaves", body: "ApiKey" },
   },
   "/v1/api-keys/{kid}": { delete: { summary: "Revoga a chave.", scope: "admin", tag: "Chaves" } },
+  "/v1/consent/terms/current": { get: { summary: "Termo de participação vigente (público).", tag: "Participantes" } },
+  "/v1/consent/terms": {
+    get: { summary: "Versões publicadas do termo.", scope: "read", tag: "Participantes" },
+    post: { summary: "Publica nova versão do termo (não editável depois).", scope: "admin", tag: "Participantes", body: "Term" },
+  },
+  "/v1/installations": { post: { summary: "Adesão pelo app: registra o aceite do termo vigente e cria a instalação pendente. Devolve o device_token.", tag: "Participantes" } },
+  "/v1/consent": { post: { summary: "Aceite ou recusa de uma versão do termo pela instalação (token mbd_).", tag: "Participantes" } },
+  "/v1/installation": { get: { summary: "Estado da instalação: autorização, consentimento e perfil de coleta (token mbd_).", tag: "Participantes" } },
+  "/v1/devices/{id}/consents": { get: { summary: "Histórico de aceites e recusas.", scope: "read", tag: "Participantes" } },
+  "/v1/devices/{id}/authorize": { post: { summary: "Autoriza a instalação e vincula o participante (participant_ref).", scope: "manage", tag: "Participantes" } },
+  "/v1/devices/{id}/revoke": { post: { summary: "Bloqueia a instalação (app mostra 'Conexão não autorizada').", scope: "manage", tag: "Participantes" } },
+  "/v1/devices/{id}/config": { put: { summary: "Perfil de coleta: hr_interval_min (0=contínua, 5, 10, 15, 30, 60, 120) e history_interval_min (15–240). Enviado ao app em tempo real.", scope: "manage", tag: "Participantes" } },
+  "/v1/technicians": {
+    get: { summary: "Lista técnicos.", scope: "admin", tag: "Acesso técnico" },
+    post: { summary: "Cria técnico (credencial, nome, senha ≥ 10 caracteres, escopos tech/provision).", scope: "admin", tag: "Acesso técnico" },
+  },
+  "/v1/technicians/{tid}": {
+    patch: { summary: "Altera nome, senha (encerra sessões), escopos ou desbloqueia.", scope: "admin", tag: "Acesso técnico" },
+    delete: { summary: "Desativa o técnico e encerra as sessões.", scope: "admin", tag: "Acesso técnico" },
+  },
+  "/v1/tech/login": { post: { summary: "Login técnico no app: credencial + senha + device_token → sessão mbt_ (10 min de inatividade, 8 h no máximo). 5 erros bloqueiam por 15 min.", tag: "Acesso técnico" } },
+  "/v1/tech/logout": { post: { summary: "Encerra a sessão técnica.", tag: "Acesso técnico" } },
+  "/v1/tech/installation": { get: { summary: "Instalação vinculada à sessão técnica.", tag: "Acesso técnico" } },
+  "/v1/tech/installation/authorize": { post: { summary: "Autoriza a instalação desta sessão (escopo provision).", tag: "Acesso técnico" } },
+  "/v1/tech/ping": { get: { summary: "Teste de comunicação autenticada.", tag: "Acesso técnico" } },
 };
 
 export function openapi(origin: string) {
@@ -124,6 +149,7 @@ export function openapi(origin: string) {
           example: { name: "Taquicardia", metric: "heart_rate", op: "gt", threshold: 120, duration_s: 60, severity: "critical", action: { vibrate: { count: 3 } } },
         },
         Webhook: { type: "object", required: ["url"], properties: { url: { type: "string" }, events: { type: "array", items: { type: "string", enum: [...WEBHOOK_EVENTS, "*"] } }, device_id: { type: "string" }, enabled: { type: "boolean" } } },
+        Term: { type: "object", required: ["version", "title", "content"], properties: { version: { type: "string" }, title: { type: "string" }, content: { type: "string" }, requires_reconsent: { type: "boolean" } } },
         ApiKey: { type: "object", required: ["name"], properties: { name: { type: "string" }, scopes: { type: "array", items: { type: "string", enum: ["read", "command", "manage", "admin"] } }, device_ids: { type: "array", items: { type: "string" } } } },
       },
     },
