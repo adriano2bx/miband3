@@ -14,6 +14,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.miband3.app.R
 import com.miband3.app.ble.BandState
+import com.miband3.app.ble.Branding
 import com.miband3.app.ble.MiBandManager
 import com.miband3.app.cloud.CloudClient
 import com.miband3.app.cloud.CloudStatus
@@ -87,7 +88,7 @@ class MiBandService : Service() {
         }.joinToString(" · ")
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_band)
-            .setContentTitle("${state.name ?: "Mi Band 3"}: ${state.connection.label}")
+            .setContentTitle("${state.name ?: Branding.PRODUCT_NAME}: ${state.connection.label}")
             .setContentText(details.ifEmpty { null })
             .setContentIntent(openApp)
             .addAction(0, "Desconectar", disconnect)

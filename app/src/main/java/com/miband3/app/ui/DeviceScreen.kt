@@ -81,6 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.miband3.app.BuildConfig
 import com.miband3.app.ble.AlarmConfig
 import com.miband3.app.ble.BandState
+import com.miband3.app.ble.Branding
 import com.miband3.app.ble.ConnectionState
 import com.miband3.app.ble.LogEntry
 import com.miband3.app.ble.MessageType
@@ -112,7 +113,7 @@ fun DeviceScreen() {
             TopAppBar(
                 title = {
                     Column {
-                        Text(state.name ?: "Mi Band 3")
+                        Text(state.name ?: Branding.PRODUCT_NAME)
                         Text(state.connection.label, style = MaterialTheme.typography.bodySmall)
                     }
                 },

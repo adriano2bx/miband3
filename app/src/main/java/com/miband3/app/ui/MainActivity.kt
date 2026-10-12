@@ -84,7 +84,7 @@ private fun AppRoot() {
 
     when {
         !granted -> Message(
-            "O app precisa de permissão de Bluetooth para encontrar e conversar com sua Mi Band 3.",
+            "O app precisa de permissão de Bluetooth para encontrar e conversar com sua Biosense Pulse.",
             "Conceder permissões",
         ) {
             val perms = requiredPermissions().toMutableList()

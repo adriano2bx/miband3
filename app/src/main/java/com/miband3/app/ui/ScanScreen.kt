@@ -45,7 +45,7 @@ fun ScanScreen() {
     }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().padding(16.dp)) {
-        Text("Parear Mi Band 3", style = MaterialTheme.typography.headlineSmall)
+        Text("Parear Biosense Pulse", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(4.dp))
         Text(
             "Deixe a pulseira próxima ao celular. Se ela estiver vinculada ao Mi Fit / Zepp Life, " +
@@ -70,7 +70,7 @@ fun ScanScreen() {
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(devices, key = { it.address }) { device ->
-                DeviceRow(device) { MiBandManager.connect(device.address, device.name) }
+                DeviceRow(device) { MiBandManager.connect(device.address, device.displayName) }
             }
         }
     }
@@ -86,11 +86,11 @@ private fun DeviceRow(device: ScannedDevice, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick), colors = colors) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             if (device.looksLikeMiBand) {
-                Icon(Icons.Filled.Star, contentDescription = "Provável Mi Band")
+                Icon(Icons.Filled.Star, contentDescription = "Provável pulseira")
                 Spacer(Modifier.width(12.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(device.name ?: "(sem nome)", style = MaterialTheme.typography.titleMedium)
+                Text(device.displayName, style = MaterialTheme.typography.titleMedium)
                 Text(device.address, style = MaterialTheme.typography.bodySmall)
             }
             Text("${device.rssi} dBm", style = MaterialTheme.typography.bodySmall)

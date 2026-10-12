@@ -72,6 +72,10 @@ data class BandState(
 data class ScannedDevice(val address: String, val name: String?, val rssi: Int) {
     val looksLikeMiBand: Boolean
         get() = name?.contains("band", ignoreCase = true) == true
+
+    /** Pulseiras reconhecidas aparecem sempre como [Branding.PRODUCT_NAME]; outros aparelhos mantêm o nome. */
+    val displayName: String
+        get() = if (looksLikeMiBand) Branding.PRODUCT_NAME else name ?: "(sem nome)"
 }
 
 data class LogEntry(val time: Long, val text: String, val fromBand: Boolean)
@@ -188,7 +192,7 @@ object MiBandManager {
         )
         _alarms.value = (0 until ALARM_SLOTS).map { loadAlarm(it) }
         registerBondReceiver()
-        _state.update { it.copy(address = savedAddress, name = prefs.getString(KEY_NAME, null)) }
+        _state.update { it.copy(address = savedAddress, name = savedAddress?.let { Branding.PRODUCT_NAME }) }
     }
 
     /** Registra no histórico quando o Android tenta parear (bond) com a pulseira — útil para diagnóstico. */
@@ -264,7 +268,7 @@ object MiBandManager {
     fun connect(address: String, name: String? = null) {
         stopScan()
         if (address != savedAddress) {
-            prefs.edit().putString(KEY_ADDRESS, address).putString(KEY_NAME, name).apply()
+            prefs.edit().putString(KEY_ADDRESS, address).putString(KEY_NAME, Branding.PRODUCT_NAME).apply()
         }
         userWantsConnection = true
         failedAttempts = 0
@@ -305,7 +309,7 @@ object MiBandManager {
             it.copy(
                 connection = ConnectionState.CONNECTING,
                 address = address,
-                name = prefs.getString(KEY_NAME, null) ?: device.name,
+                name = Branding.PRODUCT_NAME,
             )
         }
         val attempt = if (failedAttempts > 0) " (tentativa ${failedAttempts + 1} de $MAX_FAILED_ATTEMPTS)" else ""
@@ -357,7 +361,7 @@ object MiBandManager {
         val tips = buildList {
             if (bonded) {
                 add("Este celular tem um pareamento Bluetooth antigo com a pulseira: abra as configurações de Bluetooth, " +
-                    "toque na engrenagem da Mi Band 3 e escolha \"Desparear\" / \"Esquecer\".")
+                    "toque na engrenagem da Biosense Pulse e escolha \"Desparear\" / \"Esquecer\".")
             }
             add("Feche (forçar parada) o Zepp Life / Mi Fit e desligue o Bluetooth de outros celulares que já usaram a pulseira.")
             add("Se nada resolver, reinicie a pulseira de fábrica (Mais > Configurações > Restaurar) e pareie de novo.")
@@ -558,9 +562,9 @@ object MiBandManager {
         _state.update { it.copy(connection = ConnectionState.AUTHENTICATING) }
         if (gattQueue.findCharacteristic(MiBandUuids.CHAR_AUTH) == null) {
             val services = describeServices()
-            log("Sem característica de autenticação da Mi Band. Serviços encontrados:\n$services", fromBand = false)
+            log("Sem característica de autenticação da Biosense Pulse. Serviços encontrados:\n$services", fromBand = false)
             val message = "O dispositivo conectado não tem o serviço de autenticação da Xiaomi/Huami, " +
-                "então não é uma Mi Band 3 original. Pode ser outro aparelho da lista ou uma réplica " +
+                "então não é uma pulseira original compatível. Pode ser outro aparelho da lista ou uma réplica " +
                 "(\"M3\", \"Smart Band\" — usadas com apps como FitPro, Lefun ou Yoho), que usam outro protocolo.\n\n" +
                 "Serviços encontrados:\n$services"
             // Não adianta tentar de novo: o aparelho simplesmente não fala esse protocolo.
@@ -1042,7 +1046,7 @@ object MiBandManager {
 
     fun logAsText(): String {
         val fmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-        val header = "Mi Band 3 app ${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} " +
+        val header = "Biosense Pulse app ${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} " +
             "(pareado no Android: ${isBondedInAndroid()})"
         return header + "\n" + _log.value.joinToString("\n") {
             "${fmt.format(java.util.Date(it.time))} ${if (it.fromBand) "[pulseira]" else "[celular]"} ${it.text}"
