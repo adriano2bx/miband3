@@ -24,7 +24,7 @@ class MiBandServiceTest {
         var launches = 0
         var failure: RuntimeException? = null
 
-        override fun checkSelfPermission(permission: String): Int =
+        override fun checkPermission(permission: String, pid: Int, uid: Int): Int =
             if (permission in permissions) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED
 
         override fun startForegroundService(service: Intent): ComponentName? {
