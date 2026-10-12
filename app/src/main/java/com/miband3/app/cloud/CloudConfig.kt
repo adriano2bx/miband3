@@ -10,8 +10,8 @@ data class CloudConfig(
     val enabled: Boolean = false,
     val serverUrl: String = "",
     val deviceToken: String = "",
-    /** Liga a medição contínua de FC sozinha sempre que a pulseira conectar. */
-    val autoHeartRate: Boolean = true,
+    /** Intervalo entre medições de FC, em minutos. 0 = medição contínua (≈1 leitura por segundo, gasta mais bateria). */
+    val hrIntervalMin: Int = DEFAULT_HR_INTERVAL_MIN,
 ) {
     val isUsable: Boolean
         get() = enabled && wsUrl() != null && deviceToken.isNotBlank()
@@ -20,6 +20,9 @@ data class CloudConfig(
     fun wsUrl(): String? = toWebSocketUrl(serverUrl)
 
     companion object {
+        const val DEFAULT_HR_INTERVAL_MIN = 30
+        val HR_INTERVAL_OPTIONS = listOf(5, 10, 30, 60, 0)
+
         private val SCHEME = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*)://(.*)$")
 
         fun toWebSocketUrl(input: String): String? {
@@ -43,7 +46,7 @@ data class CloudConfig(
             enabled = prefs.getBoolean("enabled", false),
             serverUrl = prefs.getString("serverUrl", "") ?: "",
             deviceToken = prefs.getString("deviceToken", "") ?: "",
-            autoHeartRate = prefs.getBoolean("autoHeartRate", true),
+            hrIntervalMin = prefs.getInt("hrIntervalMin", DEFAULT_HR_INTERVAL_MIN),
         )
     }
 
@@ -52,7 +55,7 @@ data class CloudConfig(
             .putBoolean("enabled", enabled)
             .putString("serverUrl", serverUrl.trim())
             .putString("deviceToken", deviceToken.trim())
-            .putBoolean("autoHeartRate", autoHeartRate)
+            .putInt("hrIntervalMin", hrIntervalMin)
             .apply()
     }
 }

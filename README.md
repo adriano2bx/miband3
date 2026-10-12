@@ -12,7 +12,7 @@ App Android (Kotlin + Jetpack Compose) que pareia, controla e troca mensagens co
 | **Conversar** | Envia SMS, notificação de app, e-mail ou chamada simulada (com nome de quem liga) para a tela da pulseira. Um histórico em formato de chat mostra o que o celular enviou e os eventos que a pulseira mandou de volta: botão pressionado, chamada rejeitada, meta de passos, pulseira retirada etc. |
 | **Procurar celular** | Quando você usa "Encontrar celular" na pulseira, o celular toca até você confirmar. |
 | **Alarmes** | Três alarmes gravados na própria pulseira, com dias da semana ou "apenas uma vez". |
-| **Nuvem** | Envia FC, passos, bateria, eventos e o histórico de sono/atividade em tempo real, por WebSocket, a um serviço próprio no Cloudflare (pasta [`cloud/`](cloud/README.md)), e executa comandos remotos (vibrar, mensagem, medir FC, alarmes). Pensado para monitorar pacientes à distância. |
+| **Nuvem** | Envia FC (uma medição a cada 30 min por padrão; configurável de 5 min a contínua), passos, bateria, eventos e o histórico de sono/atividade em tempo real, por WebSocket, a um serviço próprio no Cloudflare (pasta [`cloud/`](cloud/README.md)), e executa comandos remotos (vibrar, mensagem, medir FC, alarmes). Pensado para monitorar pacientes à distância. |
 | **Ajustes** | Relógio de 12/24 h, acender a tela ao levantar o pulso, sincronizar data e hora, encaminhar automaticamente as notificações do celular (WhatsApp, Telegram, Instagram, chamadas… cada uma com o ícone certo na pulseira). |
 
 Um serviço em primeiro plano mantém a conexão ativa com o app em segundo plano.

@@ -80,4 +80,10 @@ class CloudMessagesTest {
         assertFalse(CloudConfig(enabled = false, serverUrl = "x.dev", deviceToken = "mbd_a").isUsable)
         assertTrue(CloudConfig(enabled = true, serverUrl = "x.dev", deviceToken = "mbd_a").isUsable)
     }
+
+    @Test
+    fun heartRateDefaultsToEvery30Minutes() {
+        assertEquals(30, CloudConfig().hrIntervalMin)
+        assertTrue(CloudConfig.HR_INTERVAL_OPTIONS.contains(0)) // 0 = contínua
+    }
 }

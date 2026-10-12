@@ -43,7 +43,7 @@ object CommandExecutor {
                     done(CommandResult())
                 }
                 "stop_call" -> { MiBandManager.stopCall(); done(CommandResult()) }
-                "measure_hr" -> { MiBandManager.measureHeartRate(); done(CommandResult()) }
+                "measure_hr" -> { CloudClient.measureHeartRateNow(); done(CommandResult()) }
                 "hr_continuous" -> { MiBandManager.setContinuousHeartRate(p.optBoolean("enabled")); done(CommandResult()) }
                 "sync_time" -> { MiBandManager.syncTime(); done(CommandResult()) }
                 "refresh" -> { MiBandManager.refreshActivity(); done(CommandResult()) }

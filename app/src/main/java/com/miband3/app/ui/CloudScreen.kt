@@ -2,6 +2,8 @@ package com.miband3.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +42,7 @@ import java.util.Date
 import java.util.Locale
 
 /** Configuração do envio de dados em tempo real para o serviço na nuvem. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CloudTab() {
     val config by CloudClient.config.collectAsStateWithLifecycle()
@@ -67,11 +71,20 @@ fun CloudTab() {
                     Text("Enviar dados à nuvem", Modifier.weight(1f))
                     Switch(checked = config.enabled, onCheckedChange = { CloudClient.updateConfig(config.copy(enabled = it)) })
                 }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Medir FC continuamente ao conectar", Modifier.weight(1f))
-                    Switch(checked = config.autoHeartRate, onCheckedChange = { CloudClient.updateConfig(config.copy(autoHeartRate = it)) })
+                Text("Medir frequência cardíaca", style = MaterialTheme.typography.titleSmall)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CloudConfig.HR_INTERVAL_OPTIONS.forEach { minutes ->
+                        FilterChip(
+                            selected = config.hrIntervalMin == minutes,
+                            onClick = { CloudClient.updateConfig(config.copy(hrIntervalMin = minutes)) },
+                            label = { Text(if (minutes == 0) "Contínua" else if (minutes == 60) "1 h" else "$minutes min") },
+                        )
+                    }
                 }
-                Text("A medição contínua consome mais bateria da pulseira.", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Uma leitura por medição. \"Contínua\" envia ~1 leitura por segundo e gasta bem mais bateria da pulseira.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
 

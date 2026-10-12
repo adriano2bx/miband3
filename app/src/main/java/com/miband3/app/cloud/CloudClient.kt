@@ -71,6 +71,7 @@ object CloudClient {
     private const val REFRESH_EVERY_TICKS = 5
     private const val HISTORY_EVERY_TICKS = 30
     private const val MAX_REMEMBERED_COMMANDS = 200
+    private const val HR_WINDOW_MS = 60_000L
 
     private lateinit var appContext: Context
     private lateinit var prefs: SharedPreferences
@@ -95,6 +96,9 @@ object CloudClient {
     private var ticks = 0
     private val pending = ArrayDeque<JSONObject>()
     private var lastHelloKey: String? = null
+
+    /** Até quando uma leitura de FC pedida por nós (ciclo ou comando) deve ser enviada. */
+    private var hrWindowUntil = 0L
 
     /** Resultado dos últimos comandos, para responder de novo sem executar duas vezes se o servidor reenviar. */
     private val handled = LinkedHashMap<String, JSONObject>()
@@ -122,6 +126,29 @@ object CloudClient {
             lastHelloKey = null
         }
         applyConfig()
+        if (old.hrIntervalMin != newConfig.hrIntervalMin && newConfig.isUsable &&
+            MiBandManager.state.value.connection == ConnectionState.READY
+        ) {
+            // Troca de modo valendo já: contínua <-> medição periódica.
+            if (newConfig.hrIntervalMin == 0) {
+                MiBandManager.setContinuousHeartRate(true)
+            } else {
+                if (MiBandManager.state.value.continuousHeartRate) MiBandManager.setContinuousHeartRate(false)
+                measureHeartRateNow()
+            }
+        }
+    }
+
+    /** Pede uma medição de FC e libera o envio da primeira leitura que chegar. */
+    fun measureHeartRateNow() {
+        if (MiBandManager.state.value.connection != ConnectionState.READY) return
+        expectHeartRate()
+        MiBandManager.measureHeartRate()
+    }
+
+    /** Marca que a próxima leitura de FC (em até 60 s) deve ir para a nuvem. Usado também pelo comando `measure_hr`. */
+    fun expectHeartRate() {
+        hrWindowUntil = System.currentTimeMillis() + HR_WINDOW_MS
     }
 
     /** Baixa agora o histórico por minuto da pulseira (sono/atividade) e envia à nuvem. */
@@ -354,12 +381,14 @@ object CloudClient {
 
     // ------------------------------------------------------------------ rotinas periódicas
 
-    /** A cada minuto: atualiza bateria/passos (a cada 5 min) e baixa o histórico (a cada 30 min). */
+    /** A cada minuto: mede a FC (a cada `hrIntervalMin`), atualiza bateria/passos (5 min) e baixa o histórico (30 min). */
     private val periodic = object : Runnable {
         override fun run() {
             if (!_config.value.isUsable) return
             ticks++
             if (MiBandManager.state.value.connection == ConnectionState.READY) {
+                val hrEvery = _config.value.hrIntervalMin
+                if (hrEvery > 0 && ticks % hrEvery == 0) measureHeartRateNow()
                 if (ticks % REFRESH_EVERY_TICKS == 0) MiBandManager.refreshActivity()
                 if (ticks % HISTORY_EVERY_TICKS == 0) MiBandManager.fetchHistory()
             }
@@ -373,6 +402,11 @@ object CloudClient {
         scope.launch {
             MiBandManager.events.collect { e ->
                 if (!_config.value.isUsable) return@collect
+                if (e is BandEvent.HeartRate && _config.value.hrIntervalMin > 0) {
+                    // Modo periódico: só a primeira leitura de cada medição pedida vira registro.
+                    if (System.currentTimeMillis() > hrWindowUntil) return@collect
+                    hrWindowUntil = 0L
+                }
                 CloudMessages.fromBandEvent(e).forEach { enqueue(it, urgent = e is BandEvent.Device) }
             }
         }
@@ -394,11 +428,13 @@ object CloudClient {
     }
 
     private fun onBandReady() {
-        if (!_config.value.autoHeartRate) return
         handler.postDelayed({
             val s = MiBandManager.state.value
-            if (_config.value.isUsable && s.connection == ConnectionState.READY && !s.continuousHeartRate) {
-                MiBandManager.setContinuousHeartRate(true)
+            if (!_config.value.isUsable || s.connection != ConnectionState.READY) return@postDelayed
+            if (_config.value.hrIntervalMin == 0) {
+                if (!s.continuousHeartRate) MiBandManager.setContinuousHeartRate(true)
+            } else {
+                measureHeartRateNow() // primeira leitura logo ao conectar
             }
         }, 4_000)
         // Recupera o que a pulseira gravou enquanto o celular estava longe.

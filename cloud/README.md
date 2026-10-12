@@ -97,7 +97,7 @@ curl -X POST $API/v1/alert-rules -H "$H" -H 'content-type: application/json' -d 
 }'
 ```
 
-Métricas: `heart_rate` e `battery` (limite + duração mínima), `offline` (segundos sem o app conectado), `event` (`match` = tipo do evento, ex. `START_NONWEAR`, `BUTTON_PRESSED`). Sem `device_id` a regra vale para todas as pulseiras. Ao disparar: grava o alerta, avisa os WebSockets, chama os webhooks `alert.created` e executa a `action` (vibrar / mensagem na pulseira).
+Métricas: `heart_rate` e `battery` (limite + duração mínima; com a FC medida a cada 30 min, use `duration_s: 0`), `offline` (segundos sem o app conectado), `event` (`match` = tipo do evento, ex. `START_NONWEAR`, `BUTTON_PRESSED`). Sem `device_id` a regra vale para todas as pulseiras. Ao disparar: grava o alerta, avisa os WebSockets, chama os webhooks `alert.created` e executa a `action` (vibrar / mensagem na pulseira).
 
 ### Webhooks
 
