@@ -21,6 +21,7 @@ async function enroll() {
 async function createTech(credential: string, scopes: string[] = ["tech"]) {
   const r = await call("POST", "/v1/technicians", { body: { credential, name: `Técnico ${credential}`, password: "senha-forte-123", scopes } });
   expect(r.status).toBe(201);
+  return r.json.id as string;
 }
 
 async function login(credential: string, password: string, deviceToken?: string) {
@@ -194,6 +195,43 @@ describe("acesso técnico", () => {
     const r = await call("POST", "/v1/tech/installation/authorize", { token: prov, body: { participant_ref: "P-2" } });
     expect(r.json).toMatchObject({ status: "active", authorized: true, participant_ref: "P-2" });
     await app.waitFor((m) => m.t === "status" && m.authorized === true);
+  });
+});
+
+describe("acesso web do técnico", () => {
+  it("cria uma sessão individual somente de leitura quando a gestão concede panel_read", async () => {
+    await publish(V1);
+    const { id } = await enroll();
+    const technicianId = await createTech("tec.painel");
+    expect((await call("POST", "/v1/panel/login", { token: "none", body: { credential: "tec.painel", password: "senha-forte-123" } })).status).toBe(403);
+
+    await call("PATCH", `/v1/technicians/${technicianId}`, { body: { scopes: ["tech", "panel_read"] } });
+    const loginResponse = await call("POST", "/v1/panel/login", { token: "none", body: { credential: "tec.painel", password: "senha-forte-123" } });
+    expect(loginResponse.status).toBe(201);
+    expect(loginResponse.json.session_token).toMatch(/^mbp_/);
+    const session = loginResponse.json.session_token as string;
+    expect((await call("GET", "/v1/me", { token: session })).json.scopes).toEqual(["read"]);
+    expect((await call("GET", "/v1/devices", { token: session })).status).toBe(200);
+    expect((await call("GET", `/v1/devices/${id}/heart-rate`, { token: session })).status).toBe(200);
+    expect((await call("GET", "/v1/technicians", { token: session })).status).toBe(403);
+    expect((await call("POST", `/v1/devices/${id}/vibrate`, { token: session, body: {} })).status).toBe(403);
+
+    await call("POST", "/v1/panel/logout", { token: session });
+    expect((await call("GET", "/v1/me", { token: session })).status).toBe(401);
+  });
+
+  it("revoga a sessão imediatamente quando o escopo de leitura é removido", async () => {
+    const technicianId = await createTech("tec.revoga.painel", ["tech", "panel_read"]);
+    const session = (await call("POST", "/v1/panel/login", { token: "none", body: { credential: "tec.revoga.painel", password: "senha-forte-123" } })).json.session_token as string;
+    await call("PATCH", `/v1/technicians/${technicianId}`, { body: { scopes: ["tech"] } });
+    expect((await call("GET", "/v1/me", { token: session })).status).toBe(401);
+  });
+
+  it("exige senha correta e aplica o bloqueio de tentativas ao login web", async () => {
+    await createTech("tec.login.web", ["tech", "panel_read"]);
+    for (let i = 0; i < 4; i++) expect((await call("POST", "/v1/panel/login", { token: "none", body: { credential: "tec.login.web", password: "errada" } })).status).toBe(401);
+    expect((await call("POST", "/v1/panel/login", { token: "none", body: { credential: "tec.login.web", password: "errada" } })).status).toBe(429);
+    expect((await call("POST", "/v1/panel/login", { token: "none", body: { credential: "tec.login.web", password: "senha-forte-123" } })).status).toBe(429);
   });
 });
 

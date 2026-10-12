@@ -105,6 +105,7 @@
     <!-- 06 Principal -->
     <string name="main_status_section">Status do dispositivo</string>
     <string name="main_program_section">Participação no programa</string>
+    <string name="main_pulse_image_description">Imagem da pulseira BIOSENSE Pulse</string>
     <string name="main_participant_title">Participante voluntário</string>
     <string name="main_participant_text">Você participa voluntariamente da Divisão de Pesquisas Avançadas em IA e Bioconexões da Deltabots.</string>
     <string name="status_active_title">Conexão ativa</string>

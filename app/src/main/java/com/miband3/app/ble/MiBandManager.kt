@@ -226,15 +226,46 @@ object MiBandManager {
                 when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
                     BluetoothAdapter.STATE_ON -> {
                         _bluetoothOn.value = true
-                        if (keepTrying) handler.postDelayed({ reconnectIfSaved() }, 1_500)
+                        if ((userWantsConnection || keepTrying) && !_state.value.authRejected) {
+                            // O estado READY não sobrevive à queda do adaptador. Mesmo que o
+                            // Android não entregue o callback GATT de desconexão, o endereço
+                            // salvo volta a ser conectado quando o Bluetooth é reativado.
+                            handler.postDelayed({ reconnectIfSaved() }, 1_500)
+                        }
                     }
-                    BluetoothAdapter.STATE_OFF, BluetoothAdapter.STATE_TURNING_OFF -> _bluetoothOn.value = false
+                    BluetoothAdapter.STATE_OFF, BluetoothAdapter.STATE_TURNING_OFF -> {
+                        _bluetoothOn.value = false
+                        handler.post { onBluetoothUnavailable() }
+                    }
                 }
             }
         }
         ContextCompat.registerReceiver(
             appContext, receiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED,
         )
+    }
+
+    /**
+     * O Android pode não enviar STATE_DISCONNECTED ao GATT quando o rádio é desligado.
+     * Invalida o estado imediatamente para a tela e a nuvem não anunciarem conexão ativa.
+     */
+    private fun onBluetoothUnavailable() {
+        handler.removeCallbacks(reconnectRunnable)
+        handler.removeCallbacks(discoveryTimeout)
+        stopHeartRatePing()
+        if (fetchStep != FetchStep.IDLE) finishFetch(success = false)
+        closeGatt()
+        val shouldRetry = (userWantsConnection || keepTrying) && !_state.value.authRejected
+        _state.update {
+            it.copy(
+                connection = ConnectionState.DISCONNECTED,
+                measuringHeartRate = false,
+                continuousHeartRate = false,
+                awaitingTap = false,
+                retrying = shouldRetry,
+            )
+        }
+        log(if (shouldRetry) "Bluetooth indisponível; aguardando o rádio para reconectar…" else "Bluetooth indisponível", fromBand = false)
     }
 
     /** Registra no histórico quando o Android tenta parear (bond) com a pulseira — útil para diagnóstico. */
@@ -437,16 +468,21 @@ object MiBandManager {
 
     private fun closeGatt() {
         gattQueue.clear()
-        gatt?.let {
-            try {
-                it.disconnect()
-                it.close()
-            } catch (e: Exception) {
-                Log.w(TAG, "closeGatt", e)
-            }
-        }
+        val oldGatt = gatt
         gatt = null
         gattQueue.gatt = null
+        if (oldGatt != null) {
+            try {
+                oldGatt.disconnect()
+            } catch (e: Exception) {
+                Log.w(TAG, "disconnect in closeGatt", e)
+            }
+            try {
+                oldGatt.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "close in closeGatt", e)
+            }
+        }
     }
 
     private val reconnectRunnable = Runnable {

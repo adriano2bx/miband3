@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { ALL_SCOPES, type Env, type Principal, type Scope } from "./types";
 import { parseJson, safeEqual, sha256Hex } from "./util";
+import { TECH_SESSION_IDLE_MS, TECH_SESSION_MAX_MS } from "./participants";
 
 export type AppEnv = { Bindings: Env; Variables: { principal: Principal } };
 
@@ -18,6 +19,20 @@ export async function authenticate(req: Request, env: Env): Promise<Principal | 
 
   if (env.ADMIN_API_KEY && (await safeEqual(token, env.ADMIN_API_KEY))) {
     return { id: "admin", scopes: new Set(ALL_SCOPES), deviceIds: null };
+  }
+  if (token.startsWith("mbp_")) {
+    const now = Date.now();
+    const session = await env.DB.prepare(
+      `SELECT s.id, s.technician_id, s.expires_at, s.max_expires_at, s.revoked_at, t.scopes, t.disabled_at
+       FROM panel_sessions s JOIN technicians t ON t.id = s.technician_id WHERE s.token_hash = ?`,
+    ).bind(await sha256Hex(token)).first<{
+      id: string; technician_id: string; expires_at: number; max_expires_at: number; revoked_at: number | null; scopes: string; disabled_at: number | null;
+    }>();
+    const technicianScopes = parseJson<string[]>(session?.scopes ?? "[]", []);
+    if (!session || session.revoked_at || session.disabled_at || session.expires_at <= now || session.max_expires_at <= now || !technicianScopes.includes("panel_read")) return null;
+    const expiresAt = Math.min(now + TECH_SESSION_IDLE_MS, session.max_expires_at);
+    env.DB.prepare("UPDATE panel_sessions SET expires_at = ? WHERE id = ?").bind(expiresAt, session.id).run().catch(() => {});
+    return { id: `tech:${session.technician_id}`, scopes: new Set(["read"]), deviceIds: null };
   }
   if (!token.startsWith("mbk_")) return null;
 

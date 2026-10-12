@@ -166,6 +166,51 @@ participantApi.post("/v1/tech/login", async (c) => {
   return c.json({ session_token: token, expires_at: expires, idle_timeout_s: TECH_SESSION_IDLE_MS / 1000, technician: { name: tech.name }, scopes: parseJson<string[]>(tech.scopes, []) }, 201);
 });
 
+/** Login do painel web: sessão individual, somente leitura, concedida pela gestão. */
+participantApi.post("/v1/panel/login", async (c) => {
+  const b = await json(c, z.object({ credential: z.string().trim().min(1).max(120), password: z.string().min(1).max(200) }));
+  if (!b.ok) return b.res;
+  const now = Date.now();
+  const db = c.env.DB;
+  const tech = await db.prepare("SELECT id, name, password_hash, scopes, failed_attempts, locked_until FROM technicians WHERE credential = ? AND disabled_at IS NULL")
+    .bind(b.data.credential).first<{ id: string; name: string; password_hash: string; scopes: string; failed_attempts: number; locked_until: number | null }>();
+  if (!tech) {
+    await burnPasswordTime(b.data.password);
+    return c.json({ error: "invalid_credentials", message: "Credencial ou senha incorretas." }, 401);
+  }
+  if (tech.locked_until && tech.locked_until > now) {
+    return c.json({ error: "locked", message: "Muitas tentativas. Tente novamente mais tarde.", retry_at: tech.locked_until }, 429);
+  }
+  if (!(await verifyPassword(b.data.password, tech.password_hash))) {
+    const failures = tech.failed_attempts + 1;
+    const lock = failures >= LOGIN_MAX_FAILURES ? now + LOGIN_LOCK_MS : null;
+    await db.prepare("UPDATE technicians SET failed_attempts = ?, locked_until = ? WHERE id = ?").bind(lock ? 0 : failures, lock, tech.id).run();
+    if (lock) return c.json({ error: "locked", message: "Muitas tentativas. Tente novamente mais tarde.", retry_at: lock }, 429);
+    return c.json({ error: "invalid_credentials", message: "Credencial ou senha incorretas.", attempts_left: LOGIN_MAX_FAILURES - failures }, 401);
+  }
+  const scopes = parseJson<string[]>(tech.scopes, []);
+  if (!scopes.includes("panel_read")) {
+    return c.json({ error: "panel_access_disabled", message: "A gestão ainda não autorizou este técnico a consultar dados no painel." }, 403);
+  }
+  const token = randomToken("mbp");
+  const expires = now + TECH_SESSION_IDLE_MS;
+  await db.batch([
+    db.prepare("UPDATE technicians SET failed_attempts = 0, locked_until = NULL WHERE id = ?").bind(tech.id),
+    db.prepare("INSERT INTO panel_sessions (id, token_hash, technician_id, created_at, expires_at, max_expires_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(newId("pws"), await sha256Hex(token), tech.id, now, expires, now + TECH_SESSION_MAX_MS),
+  ]);
+  return c.json({ session_token: token, expires_at: expires, idle_timeout_s: TECH_SESSION_IDLE_MS / 1000, technician: { name: tech.name }, scopes: ["read"] }, 201);
+});
+
+participantApi.post("/v1/panel/logout", async (c) => {
+  const token = bearer(c);
+  if (token?.startsWith("mbp_")) {
+    await c.env.DB.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
+      .bind(Date.now(), await sha256Hex(token)).run();
+  }
+  return c.json({ logged_out: true });
+});
+
 interface TechContext {
   sessionId: string;
   technician: { id: string; name: string };
@@ -318,7 +363,7 @@ const TechInput = z.object({
   credential: z.string().trim().min(3).max(120),
   name: z.string().trim().min(1).max(120),
   password: z.string().min(10).max(200),
-  scopes: z.array(z.enum(["tech", "provision"])).min(1).default(["tech"]),
+  scopes: z.array(z.enum(["tech", "provision", "panel_read"])).min(1).default(["tech"]),
 });
 
 participantApi.post("/v1/technicians", requireAuth("admin"), async (c) => {
@@ -351,6 +396,11 @@ participantApi.patch("/v1/technicians/:tid", requireAuth("admin"), async (c) => 
     stmts.push(db.prepare("UPDATE technicians SET password_hash = ? WHERE id = ?").bind(await hashPassword(b.data.password), tid));
     // Trocar a senha encerra as sessões abertas.
     stmts.push(db.prepare("UPDATE tech_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(Date.now(), tid));
+    stmts.push(db.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(Date.now(), tid));
+  }
+  if (b.data.scopes) {
+    stmts.push(db.prepare("UPDATE technicians SET scopes = ? WHERE id = ?").bind(JSON.stringify(b.data.scopes), tid));
+    if (!b.data.scopes.includes("panel_read")) stmts.push(db.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(Date.now(), tid));
   }
   if (b.data.unlock) stmts.push(db.prepare("UPDATE technicians SET failed_attempts = 0, locked_until = NULL WHERE id = ?").bind(tid));
   if (stmts.length) await db.batch(stmts);
@@ -363,6 +413,7 @@ participantApi.delete("/v1/technicians/:tid", requireAuth("admin"), async (c) =>
   const res = await c.env.DB.prepare("UPDATE technicians SET disabled_at = ? WHERE id = ? AND disabled_at IS NULL").bind(now, tid).run();
   if (!res.meta.changes) return c.json({ error: "not_found" }, 404);
   await c.env.DB.prepare("UPDATE tech_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(now, tid).run();
+  await c.env.DB.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(now, tid).run();
   return c.json({ disabled: tid });
 });
 

@@ -6,7 +6,7 @@ import { WEBHOOK_EVENTS } from "./webhooks";
  * no Swagger UI em /docs/. Mantida à mão: ao criar ou mudar uma rota, atualize aqui.
  */
 
-type Auth = "public" | "device" | "tech" | "read" | "command" | "manage" | "admin";
+type Auth = "public" | "device" | "tech" | "panel" | "read" | "command" | "manage" | "admin";
 
 interface Op {
   summary: string;
@@ -122,6 +122,8 @@ const routes: Record<string, Record<string, Op>> = {
     delete: { summary: "Desativar técnico e encerrar sessões", tag: "Acesso técnico", auth: "admin", res: "Disabled" },
   },
   "/v1/tech/login": { post: { summary: "Login técnico (usado pelo app)", description: "Sessão `mbt_…` presa à instalação do celular: 10 min sem uso, 8 h no máximo. 5 senhas erradas bloqueiam a credencial por 15 min (HTTP 429).", tag: "Acesso técnico", auth: "public", body: "TechLogin", res: "TechSession", status: 201 } },
+  "/v1/panel/login": { post: { summary: "Login individual de técnico no painel (somente leitura)", description: "Exige o escopo `panel_read` concedido pela gestão. Sessão `mbp_…`: 10 min sem uso, 8 h no máximo.", tag: "Acesso técnico", auth: "public", body: "PanelLogin", res: "PanelSession", status: 201 } },
+  "/v1/panel/logout": { post: { summary: "Encerrar sessão de painel do técnico", tag: "Acesso técnico", auth: "panel", res: "LoggedOut" } },
   "/v1/tech/logout": { post: { summary: "Encerrar sessão técnica", tag: "Acesso técnico", auth: "tech", res: "LoggedOut" } },
   "/v1/tech/installation": { get: { summary: "Instalação da sessão técnica", tag: "Acesso técnico", auth: "tech", res: "TechInstallation" } },
   "/v1/tech/installation/authorize": { post: { summary: "Autorizar a instalação da sessão (escopo provision)", tag: "Acesso técnico", auth: "tech", body: "Authorize", res: "TechInstallation" } },
@@ -153,6 +155,7 @@ const AUTH_TEXT: Record<Auth, string> = {
   public: "Sem autenticação.",
   device: "Token do dispositivo (`mbd_…`), usado pelo app.",
   tech: "Sessão técnica (`mbt_…`) obtida em `POST /v1/tech/login`.",
+  panel: "Sessão web individual (`mbp_…`) de técnico com escopo somente leitura.",
   read: "Chave com escopo `read` (ou a chave mestra).",
   command: "Chave com escopo `command` (ou a chave mestra).",
   manage: "Chave com escopo `manage` (ou a chave mestra).",
@@ -318,11 +321,13 @@ const schemas: Record<string, unknown> = {
   TermInput: obj({ version: { type: "string", example: "2026.1" }, title: T.str, content: { type: "string", minLength: 20 }, requires_reconsent: { type: "boolean", default: true } }, ["version", "title", "content"]),
   Enroll: obj({ consent_version: { type: "string", example: "2026.1" }, accepted: { type: "boolean", enum: [true] }, client: obj({ app: T.str, version: T.str, os: T.str, model: T.str }) }, ["consent_version", "accepted"]),
   ConsentDecision: obj({ version: T.str, accepted: T.bool, client: T.obj }, ["version", "accepted"]),
-  TechnicianInput: obj({ credential: { type: "string", example: "ana.souza" }, name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision"] }, default: ["tech"] } }, ["credential", "name", "password"]),
-  TechnicianPatch: obj({ name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision"] } }, unlock: T.bool }),
+  TechnicianInput: obj({ credential: { type: "string", example: "ana.souza" }, name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision", "panel_read"] }, default: ["tech"] } }, ["credential", "name", "password"]),
+  TechnicianPatch: obj({ name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision", "panel_read"] } }, unlock: T.bool }),
   Technician: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
   TechLogin: obj({ credential: T.str, password: T.str, device_token: { type: "string", description: "Token da instalação do celular." } }, ["credential", "password"]),
   TechSession: obj({ session_token: { type: "string", example: "mbt_…" }, expires_at: T.ts, idle_timeout_s: T.int, technician: obj({ name: T.str }), scopes: { type: "array", items: T.str } }),
+  PanelLogin: obj({ credential: T.str, password: T.str }, ["credential", "password"]),
+  PanelSession: obj({ session_token: { type: "string", example: "mbp_…" }, expires_at: T.ts, idle_timeout_s: T.int, technician: obj({ name: T.str }), scopes: { type: "array", items: T.str } }),
   TechInstallation: { allOf: [ref("Installation"), obj({ name: T.str, technician: T.str, scopes: { type: "array", items: T.str }, session_expires_at: T.ts })] },
   TechPing: obj({ ok: T.bool, server_time: T.ts, device_online: T.bool }),
   Deleted: obj({ deleted: T.str }),
@@ -346,6 +351,7 @@ Envie \`Authorization: Bearer <token>\`. Clique em **Authorize** e cole a chave 
 | \`mbk_…\` (chave de API) | outros sistemas | \`read\`, \`command\`, \`manage\`, \`admin\`; pode ser restrita a instalações |
 | \`mbd_…\` (token do dispositivo) | app BIOSENSE | \`/v1/connect\`, \`/v1/consent\`, \`/v1/installation\` |
 | \`mbt_…\` (sessão técnica) | área técnica do app | rotas \`/v1/tech/*\` |
+| \`mbp_…\` (sessão do painel) | técnico autorizado pela gestão | leitura dos registros; 10 min sem uso, 8 h no máximo |
 
 Horários são epoch em **milissegundos** (filtros \`from\`/\`to\` também aceitam ISO 8601). Séries aceitam \`?format=csv\` e paginam com o objeto \`next\` (use como novo \`from\`/\`to\`).
 

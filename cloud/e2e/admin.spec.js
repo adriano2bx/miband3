@@ -15,8 +15,16 @@ async function setup(page, custom) {
     requests.push({ path: url.pathname, method: req.method(), body: req.postDataJSON() });
     if (custom && await custom(route, url)) return;
     let data = { data: [] };
-    if (url.pathname === '/v1/me') data = { id: 'admin', scopes: ['manage'] };
+    if (url.pathname === '/v1/panel/login') data = { session_token: 'mbp-synthetic', technician: { name: 'Técnica Teste' } };
+    else if (url.pathname === '/v1/me') data = req.headers().authorization === 'Bearer mbp-synthetic'
+      ? { id: 'tech:tec-1', scopes: ['read'], device_ids: null }
+      : { id: 'admin', scopes: ['read', 'manage'] };
     else if (url.pathname === '/v1/devices') data = { data: initial, next: null };
+    else if (url.pathname.endsWith('/summary')) data = { heart_rate: { avg: 72.5, min: 61, max: 91, samples: 12 }, steps: { max_steps: 5400, max_meters: 3600 }, battery: { min_level: 65, max_level: 89 }, events: [{ n: 2 }], alerts: [{ n: 1 }], sleep: { sessions: 1, total_min: 420, provisional: true } };
+    else if (url.pathname.endsWith('/heart-rate')) data = { data: [{ ts: 1791800000000, avg: 72 }, { ts: 1791803600000, avg: 75 }], count: 2 };
+    else if (url.pathname.endsWith('/steps')) data = { data: [{ ts: 1791800000000, steps: 5400 }], count: 1 };
+    else if (url.pathname.endsWith('/sleep')) data = { data: [{ start: 1791800000000, end: 1791803600000, duration_min: 420, deep_min: 100, light_min: 300, avg_hr: 62 }], count: 1, warning: 'Classificação provisória.' };
+    else if (url.pathname.endsWith('/events')) data = { data: [{ ts: 1791800000000, type: 'BUTTON_PRESSED', data: { source: 'pulse' } }], count: 1 };
     else if (url.pathname.endsWith('/status')) data = { online: true, latest: { state: { connection: 'READY' } } };
     else if (url.pathname.endsWith('/config')) data = { config_version: 3 };
     else if (url.pathname.endsWith('/current')) data = { title: 'Participação', version: '2026.1', content: 'Texto do termo de teste' };
@@ -132,7 +140,7 @@ test('desktop and mobile layouts, navigation and no runtime errors', async ({ pa
   await setup(page);
   await expect(page.locator('#installs tr')).toHaveCount(3);
   await page.screenshot({ path: 'test-results/admin-desktop.png', fullPage: true });
-  for (const tab of ['terms', 'techs', 'alerts', 'installs']) {
+  for (const tab of ['monitor', 'terms', 'techs', 'alerts', 'installs']) {
     await page.locator(`[data-tab="${tab}"]`).click();
     await expect(page.locator(`[data-panel="${tab}"]`)).toBeVisible();
   }
@@ -142,4 +150,28 @@ test('desktop and mobile layouts, navigation and no runtime errors', async ({ pa
   await page.getByRole('button', { name: 'Configurar coleta' }).click();
   await expect(page.locator('#cfgDialog')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('technician login is read-only and opens participant monitoring', async ({ page }) => {
+  const requests = await setup(page, async (route, url) => {
+    if (url.pathname === '/v1/devices') {
+      await route.fulfill({ json: { data: [initial[0]], next: null } }); return true;
+    }
+    return false;
+  });
+  await page.locator('#logout').click();
+  await page.getByRole('button', { name: 'Técnico' }).click();
+  await page.locator('#techCredential').fill('tec-1');
+  await page.locator('#techPassword').fill('not-a-real-password');
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page.locator('#app')).toBeVisible();
+  await expect(page.locator('#who')).toHaveText('Técnica Teste');
+  await expect(page.locator('[data-tab="monitor"]')).toBeVisible();
+  await expect(page.locator('[data-tab="installs"]')).toBeHidden();
+  await expect(page.locator('#monitorTitle')).toBeVisible();
+  await expect(page.locator('#metricHrAvg')).toHaveText('72.5 bpm');
+  await expect(page.locator('#metricSteps')).toHaveText('5.400');
+  await expect(page.locator('#sleepRows')).toContainText('100 min');
+  await expect(page.locator('#eventRows')).toContainText('BUTTON_PRESSED');
+  expect(requests.some(r => r.method === 'POST' && r.path === '/v1/panel/login')).toBe(true);
 });

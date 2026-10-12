@@ -2,6 +2,7 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 const KEY = "biosense.admin.key";
+const TECH_NAME = "biosense.admin.technician";
 let apiKey = sessionStorage.getItem(KEY) || "";
 let devices = [];
 
@@ -39,6 +40,10 @@ const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (
 
 // ------------------------------------------------------------------ sessão
 function logout(msg) {
+  const oldToken = apiKey;
+  if (oldToken.startsWith("mbp_")) {
+    fetch("/v1/panel/logout", { method: "POST", headers: { authorization: `Bearer ${oldToken}` }, keepalive: true }).catch(() => {});
+  }
   ++installsRequest;
   clearInterval(cmdTimer);
   cmdDevice = null;
@@ -63,22 +68,69 @@ function logout(msg) {
   $("#reload").disabled = false;
   $("#loadMore").disabled = false;
   $("#installs").removeAttribute("aria-busy");
-  apiKey = ""; sessionStorage.removeItem(KEY);
+  apiKey = ""; sessionStorage.removeItem(KEY); sessionStorage.removeItem(TECH_NAME);
   $("#app").classList.add("hidden"); $("#logout").classList.add("hidden"); $("#docsLink").classList.add("hidden"); $("#who").textContent = "";
   $("#login").classList.remove("hidden");
+  setLoginMode("admin");
   $("#loginMsg").replaceChildren(msg ? el("div", { class: "notice error", style: "margin-top:12px" }, msg) : "");
 }
 async function start() {
   if (!apiKey) return logout();
   try {
     const me = await api("GET", "/v1/me");
-    if (!me.scopes.includes("manage")) return logout("Esta chave não tem permissão de gestão.");
-    $("#who").textContent = me.id === "admin" ? "Administrador" : "Gestão";
+    const canManage = me.scopes.includes("manage") || me.scopes.includes("admin");
+    const canRead = me.scopes.includes("read") || me.scopes.includes("admin");
+    if (!canRead) return logout("Esta credencial não tem permissão de leitura.");
+    $("#who").textContent = me.id === "admin" ? "Gestão" : me.id.startsWith("tech:") ? (sessionStorage.getItem(TECH_NAME) || "Técnico") : canManage ? "Gestão" : "Leitura";
     $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
-    loadInstalls();
+    document.querySelectorAll("nav [data-tab]").forEach((button) => {
+      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "monitor");
+    });
+    if (canManage) {
+      document.querySelector('[data-tab="installs"]').click();
+    } else {
+      document.querySelector('[data-tab="monitor"]').click();
+    }
   } catch (e) { if (e.message !== "unauthorized") logout(e.message); }
 }
-$("#loginForm").addEventListener("submit", (e) => { e.preventDefault(); apiKey = $("#key").value.trim(); sessionStorage.setItem(KEY, apiKey); $("#key").value = ""; start(); });
+let loginMode = "admin";
+function setLoginMode(mode) {
+  loginMode = mode;
+  const isTech = mode === "tech";
+  $("#adminLoginFields").classList.toggle("hidden", isTech);
+  $("#techLoginFields").classList.toggle("hidden", !isTech);
+  $("#key").required = !isTech;
+  $("#techCredential").required = isTech;
+  $("#techPassword").required = isTech;
+  document.querySelectorAll("[data-login-mode]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.loginMode === mode)));
+  $("#loginMsg").replaceChildren();
+}
+document.querySelectorAll("[data-login-mode]").forEach((button) => button.addEventListener("click", () => setLoginMode(button.dataset.loginMode)));
+$("#loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#loginMsg").replaceChildren();
+  try {
+    if (loginMode === "tech") {
+      const response = await fetch("/v1/panel/login", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ credential: $("#techCredential").value.trim(), password: $("#techPassword").value }),
+      });
+      const result = await response.json();
+      $("#techPassword").value = "";
+      if (!response.ok) throw new Error(result.message || result.error || `Erro ${response.status}`);
+      apiKey = result.session_token;
+      sessionStorage.setItem(TECH_NAME, result.technician?.name || "Técnico");
+    } else {
+      apiKey = $("#key").value.trim();
+      $("#key").value = "";
+    }
+    sessionStorage.setItem(KEY, apiKey);
+    await start();
+  } catch (error) {
+    apiKey = ""; sessionStorage.removeItem(KEY); sessionStorage.removeItem(TECH_NAME);
+    $("#loginMsg").replaceChildren(el("div", { class: "notice error", style: "margin-top:12px", role: "alert" }, error.message));
+  }
+});
 $("#logout").addEventListener("click", () => logout());
 
 // ------------------------------------------------------------------ abas
@@ -86,7 +138,7 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   document.querySelectorAll("nav button").forEach((x) => { if (x === b) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
   document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
   $("#flash").replaceChildren();
-  ({ installs: loadInstalls, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
+  ({ installs: loadInstalls, monitor: loadMonitorDevices, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------------ instalações
@@ -335,6 +387,144 @@ $("#cmdHr").addEventListener("click", cmdGuard(() => sendCommand("measure_hr", {
 $("#cmdHistory").addEventListener("click", cmdGuard(() => sendCommand("fetch_history", {}, 300)));
 $("#cmdTime").addEventListener("click", cmdGuard(() => sendCommand("sync_time", {})));
 
+// ------------------------------------------------------------------ monitoramento de dados registrados
+let monitorDevices = [];
+let selectedMonitorId = "";
+let monitorRequest = 0;
+const selectedMonitorDevice = () => monitorDevices.find((d) => d.id === selectedMonitorId);
+const dateLabel = (ms) => ms ? new Date(ms).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+const durationLabel = (minutes) => `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}min`;
+const setMonitorEmpty = (message) => {
+  ["hrChart", "stepsChart"].forEach((id) => $("#" + id).replaceChildren(el("div", { class: "chart-empty" }, message)));
+  ["metricHrAvg", "metricSteps", "metricSleep", "metricBattery", "metricAlerts"].forEach((id) => $("#" + id).textContent = "—");
+  $("#metricHrRange").textContent = "sem amostras";
+  $("#metricDistance").textContent = "no período selecionado";
+  $("#metricSleepCount").textContent = "sem sessões";
+  $("#metricBatteryRange").textContent = "sem leituras";
+  $("#metricEvents").textContent = "eventos no período";
+  $("#sleepRows").replaceChildren(); $("#eventRows").replaceChildren();
+  $("#sleepEmpty").classList.remove("hidden"); $("#eventsEmpty").classList.remove("hidden");
+};
+
+function drawHeartChart(rows) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg ?? r.bpm) })).filter((p) => Number.isFinite(p.value));
+  const box = $("#hrChart");
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, "Sem registros de frequência cardíaca neste período.")); return; }
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 210"); svg.setAttribute("role", "presentation");
+  const min = Math.min(...points.map((p) => p.value)); const max = Math.max(...points.map((p) => p.value));
+  const pad = Math.max(5, Math.ceil((max - min) * 0.15)); const lo = Math.max(0, min - pad); const hi = max + pad;
+  const xy = points.map((p, i) => [points.length === 1 ? 400 : 18 + i * 764 / (points.length - 1), 184 - ((p.value - lo) / Math.max(1, hi - lo)) * 158]);
+  [26, 78, 130, 184].forEach((y) => { const line = document.createElementNS(NS, "line"); line.setAttribute("x1", "0"); line.setAttribute("x2", "800"); line.setAttribute("y1", String(y)); line.setAttribute("y2", String(y)); line.setAttribute("class", "chart-grid"); svg.append(line); });
+  const d = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = document.createElementNS(NS, "path"); area.setAttribute("d", `${d} L${xy.at(-1)[0]},184 L${xy[0][0]},184 Z`); area.setAttribute("class", "chart-area"); svg.append(area);
+  const line = document.createElementNS(NS, "path"); line.setAttribute("d", d); line.setAttribute("class", "chart-line"); svg.append(line);
+  xy.forEach(([x, y], i) => { const circle = document.createElementNS(NS, "circle"); circle.setAttribute("cx", String(x)); circle.setAttribute("cy", String(y)); circle.setAttribute("r", points.length > 36 ? "2.4" : "4"); circle.setAttribute("class", "chart-dot"); circle.setAttribute("aria-label", `${dateLabel(points[i].ts)}: ${points[i].value} bpm`); svg.append(circle); });
+  box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${Math.min(...points.map((p) => p.value))}–${Math.max(...points.map((p) => p.value))} bpm`, dateLabel(points.at(-1).ts)));
+}
+
+function drawStepsChart(rows) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.steps) })).filter((p) => Number.isFinite(p.value));
+  const box = $("#stepsChart");
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, "Sem registros de passos neste período.")); return; }
+  const max = Math.max(1, ...points.map((p) => p.value));
+  const bars = el("div", { class: "chart-bars", role: "list" }, ...points.slice(-30).map((p) => {
+    const bar = el("div", { class: "chart-bar", role: "listitem", title: `${dateLabel(p.ts)} · ${p.value.toLocaleString("pt-BR")} passos` });
+    bar.append(el("span", { style: `--bar-height:${Math.max(2, p.value / max * 100)}%` }));
+    return bar;
+  }));
+  const shown = points.slice(-30);
+  box.replaceChildren(bars, el("div", { class: "chart-labels" }, dateLabel(shown[0].ts), `${Math.max(...points.map((p) => p.value)).toLocaleString("pt-BR")} passos`, dateLabel(shown.at(-1).ts)));
+}
+
+async function loadMonitorDevices() {
+  const select = $("#monitorDevice");
+  select.disabled = true;
+  try {
+    const { data } = await api("GET", "/v1/devices?limit=500&status=active");
+    monitorDevices = data;
+    select.replaceChildren(...data.map((d) => el("option", { value: d.id }, `${d.patient_ref || d.name || "Sem referência"} · ${shortId(d.id)}`)));
+    if (!data.length) {
+      selectedMonitorId = ""; setMonitorEmpty("Nenhuma instalação autorizada com dados disponíveis.");
+      $("#monitorUpdatedAt").textContent = "Sem instalações autorizadas";
+      select.disabled = true;
+      return;
+    }
+    if (!data.some((d) => d.id === selectedMonitorId)) selectedMonitorId = data[0].id;
+    select.value = selectedMonitorId;
+    select.disabled = false;
+    await loadMonitorData();
+  } catch (e) {
+    if (e.message !== "unauthorized") {
+      $("#monitorNotice").className = "notice error"; $("#monitorNotice").textContent = e.message;
+      setMonitorEmpty("Não foi possível carregar as instalações.");
+    }
+  }
+}
+
+async function loadMonitorData() {
+  const device = selectedMonitorDevice();
+  if (!device) return setMonitorEmpty("Selecione uma instalação para consultar os registros.");
+  const request = ++monitorRequest;
+  const notice = $("#monitorNotice"); notice.classList.add("hidden"); notice.textContent = "";
+  $("#monitorUpdatedAt").textContent = "Atualizando registros…";
+  $("#monitorReload").disabled = true;
+  const to = Date.now(); const from = to - Number($("#monitorRange").value);
+    const query = new URLSearchParams({ from: String(from), to: String(to), limit: "1000" });
+    const eventsQuery = new URLSearchParams(query);
+    eventsQuery.set("limit", "30");
+    eventsQuery.set("order", "desc");
+  const id = encodeURIComponent(device.id);
+  try {
+    const span = to - from;
+    const [summary, hr, steps, sleep, events] = await Promise.all([
+      api("GET", `/v1/devices/${id}/summary?${query}`),
+      api("GET", `/v1/devices/${id}/heart-rate?${query}&bucket=${span <= 86_400_000 ? "15m" : "1h"}`),
+      api("GET", `/v1/devices/${id}/steps?${query}&bucket=${span <= 86_400_000 ? "1h" : "1d"}&tz_offset_min=-180`),
+      api("GET", `/v1/devices/${id}/sleep?${query}`),
+      api("GET", `/v1/devices/${id}/events?${eventsQuery}`),
+    ]);
+    if (request !== monitorRequest || !apiKey) return;
+    const h = summary.heart_rate || {}; const s = summary.steps || {}; const b = summary.battery || {};
+    $("#metricHrAvg").textContent = Number.isFinite(Number(h.avg)) && h.samples ? `${h.avg} bpm` : "—";
+    $("#metricHrRange").textContent = h.samples ? `mín. ${h.min} · máx. ${h.max} · ${h.samples} amostras` : "sem amostras";
+    $("#metricSteps").textContent = s.max_steps == null ? "—" : Number(s.max_steps).toLocaleString("pt-BR");
+    $("#metricDistance").textContent = s.max_meters == null ? "distância não informada" : `${(Number(s.max_meters) / 1000).toFixed(2).replace(".", ",")} km estimados`;
+    $("#metricSleep").textContent = sleep.count ? durationLabel(summary.sleep.total_min || 0) : "—";
+    $("#metricSleepCount").textContent = sleep.count ? `${sleep.count} sessão(ões) · classificação provisória` : "sem sessões";
+    $("#metricBattery").textContent = b.min_level == null ? "—" : `${b.min_level}–${b.max_level}%`;
+    $("#metricBatteryRange").textContent = b.min_level == null ? "sem leituras" : "mínimo–máximo no período";
+    const alertCount = (summary.alerts || []).reduce((n, x) => n + Number(x.n || 0), 0);
+    const eventCount = (summary.events || []).reduce((n, x) => n + Number(x.n || 0), 0);
+    $("#metricAlerts").textContent = String(alertCount);
+    $("#metricEvents").textContent = `${eventCount} evento(s) registrado(s)`;
+    drawHeartChart(hr.data || []); drawStepsChart(steps.data || []);
+    $("#sleepRows").replaceChildren(...(sleep.data || []).slice().reverse().map((row) => el("tr", {},
+      el("td", {}, fmt(row.start)), el("td", {}, durationLabel(row.duration_min)), el("td", {}, `${row.deep_min} min`), el("td", {}, `${row.light_min} min`), el("td", {}, row.avg_hr == null ? "—" : `${row.avg_hr} bpm`))));
+    $("#sleepEmpty").classList.toggle("hidden", Boolean(sleep.count));
+    $("#eventRows").replaceChildren(...(events.data || []).map((row) => {
+      const details = row.data == null ? "—" : JSON.stringify(row.data);
+      return el("tr", {}, el("td", {}, fmt(row.ts)), el("td", {}, row.type), el("td", {}, details.length > 100 ? `${details.slice(0, 100)}…` : details));
+    }));
+    $("#eventsEmpty").classList.toggle("hidden", Boolean(events.count));
+    $("#monitorUpdatedAt").textContent = `Atualizado às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+    if (sleep.warning) {
+      notice.textContent = "Sono: " + sleep.warning;
+      notice.className = "notice warn";
+    }
+  } catch (e) {
+    if (request === monitorRequest && e.message !== "unauthorized") {
+      notice.textContent = e.message; notice.className = "notice error";
+      $("#monitorUpdatedAt").textContent = "Falha ao atualizar";
+    }
+  } finally {
+    if (request === monitorRequest) $("#monitorReload").disabled = false;
+  }
+}
+$("#monitorDevice").addEventListener("change", () => { selectedMonitorId = $("#monitorDevice").value; loadMonitorData(); });
+$("#monitorRange").addEventListener("change", loadMonitorData);
+$("#monitorReload").addEventListener("click", () => loadMonitorDevices());
+
 // ------------------------------------------------------------------ termo
 const loadTerms = guard(async () => {
   const cur = await fetch("/v1/consent/terms/current");
@@ -365,10 +555,14 @@ const loadTechs = guard(async () => {
     return el("tr", {},
       el("td", {}, t.name),
       el("td", {}, t.credential),
-      el("td", {}, t.scopes.includes("provision") ? "Testes e autorização" : "Testes"),
+      el("td", {}, ["Testes", ...(t.scopes.includes("provision") ? ["Autorizar instalações"] : []), ...(t.scopes.includes("panel_read") ? ["Painel · leitura"] : [])].join(" · ")),
       el("td", {}, t.disabled_at ? el("span", { class: "pill revoked" }, "Desativado") : locked ? el("span", { class: "pill pending" }, "Bloqueado por tentativas") : el("span", { class: "pill active" }, "Ativo")),
       el("td", {}, t.disabled_at ? "" : el("div", { class: "actions" },
         locked ? el("button", { class: "btn secondary", onclick: () => techAction(t, { unlock: true }, "Desbloqueado.") }, "Desbloquear") : null,
+        el("button", { class: "btn secondary", onclick: () => {
+          const scopes = t.scopes.includes("panel_read") ? t.scopes.filter((scope) => scope !== "panel_read") : [...t.scopes, "panel_read"];
+          techAction(t, { scopes }, t.scopes.includes("panel_read") ? "Acesso web revogado." : "Acesso web de leitura concedido.");
+        } }, t.scopes.includes("panel_read") ? "Revogar painel" : "Permitir painel"),
         el("button", { class: "btn secondary", onclick: () => resetPassword(t) }, "Nova senha"),
         el("button", { class: "btn danger", onclick: () => disableTech(t) }, "Desativar"),
       )),
@@ -377,7 +571,10 @@ const loadTechs = guard(async () => {
 });
 $("#techForm").addEventListener("submit", guard(async (e) => {
   e.preventDefault();
-  await api("POST", "/v1/technicians", { credential: $("#cCred").value.trim(), name: $("#cName").value.trim(), password: $("#cPass").value, scopes: $("#cProv").checked ? ["tech", "provision"] : ["tech"] });
+  const scopes = ["tech"];
+  if ($("#cProv").checked) scopes.push("provision");
+  if ($("#cPanelRead").checked) scopes.push("panel_read");
+  await api("POST", "/v1/technicians", { credential: $("#cCred").value.trim(), name: $("#cName").value.trim(), password: $("#cPass").value, scopes });
   flash(`Técnico ${$("#cName").value.trim()} criado.`);
   $("#techForm").reset();
   loadTechs();

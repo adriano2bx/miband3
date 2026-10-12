@@ -22,12 +22,25 @@
 <section id="login" class="hidden">
   <main>
     <div class="card" style="max-width:480px;margin:40px auto">
-      <h1>Administração</h1>
-      <p class="sub">Use a chave mestra (ADMIN_API_KEY) ou uma chave de API com escopo de gestão. A chave fica só nesta aba do navegador.</p>
+      <h1>Acesso ao BIOSENSE</h1>
+      <p class="sub">Entre com uma credencial individual. O acesso de gestão continua disponível pela chave administrativa.</p>
+      <div class="login-switch" role="group" aria-label="Tipo de acesso">
+        <button type="button" data-login-mode="admin" aria-pressed="true">Gestão</button>
+        <button type="button" data-login-mode="tech" aria-pressed="false">Técnico</button>
+      </div>
       <form id="loginForm">
-        <label for="key">Chave de acesso</label>
-        <input id="key" type="password" autocomplete="off" required>
-        <div style="margin-top:12px"><button class="btn" type="submit">Entrar</button></div>
+        <div id="adminLoginFields">
+          <label for="key">Chave de gestão</label>
+          <input id="key" type="password" autocomplete="current-password" required>
+        </div>
+        <div id="techLoginFields" class="hidden">
+          <label for="techCredential">Credencial</label>
+          <input id="techCredential" autocomplete="username">
+          <label for="techPassword" style="margin-top:12px">Senha</label>
+          <input id="techPassword" type="password" autocomplete="current-password">
+          <p class="muted" style="margin:10px 0 0">Acesso ao painel somente para técnicos autorizados pela gestão.</p>
+        </div>
+        <div style="margin-top:16px"><button class="btn" type="submit">Entrar</button></div>
       </form>
       <div id="loginMsg"></div>
     </div>
@@ -37,6 +50,7 @@
 <section id="app" class="hidden">
   <nav aria-label="Seções administrativas">
     <button data-tab="installs" aria-current="page">Instalações</button>
+    <button data-tab="monitor">Monitoramento</button>
     <button data-tab="terms">Termos de participação</button>
     <button data-tab="techs">Técnicos</button>
     <button data-tab="alerts">Alertas</button>
@@ -77,6 +91,51 @@
       </div>
     </section>
 
+    <!-- Monitoramento -->
+    <section data-panel="monitor" class="hidden" aria-labelledby="monitorTitle">
+      <div class="page-heading monitor-heading">
+        <div><p class="eyebrow">Pesquisa / Séries registradas</p>
+          <h1 id="monitorTitle">Monitoramento</h1>
+          <p class="sub">Consulta temporal dos registros recebidos de cada BIOSENSE Pulse.</p></div>
+        <div class="refresh-control"><span id="monitorUpdatedAt" class="muted" role="status">Selecione uma instalação</span>
+          <button class="btn secondary" id="monitorReload">Atualizar <span aria-hidden="true">↻</span></button></div>
+      </div>
+      <div class="monitor-filters">
+        <div><label for="monitorDevice">Participante / instalação</label><select id="monitorDevice"></select></div>
+        <div><label for="monitorRange">Período</label><select id="monitorRange"><option value="86400000">Últimas 24 horas</option><option value="604800000" selected>Últimos 7 dias</option><option value="2592000000">Últimos 30 dias</option></select></div>
+      </div>
+      <div id="monitorNotice" class="notice hidden" role="status"></div>
+      <dl class="monitor-kpis" aria-label="Resumo do período">
+        <div><dt>FC média</dt><dd id="metricHrAvg">—</dd><small id="metricHrRange">sem amostras</small></div>
+        <div><dt>Passos</dt><dd id="metricSteps">—</dd><small id="metricDistance">no período selecionado</small></div>
+        <div><dt>Sono estimado</dt><dd id="metricSleep">—</dd><small id="metricSleepCount">sem sessões</small></div>
+        <div><dt>Bateria</dt><dd id="metricBattery">—</dd><small id="metricBatteryRange">sem leituras</small></div>
+        <div><dt>Alertas</dt><dd id="metricAlerts">—</dd><small id="metricEvents">eventos no período</small></div>
+      </dl>
+      <div class="monitor-grid">
+        <section class="monitor-chart" aria-labelledby="hrChartTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Sinal fisiológico</p><h2 id="hrChartTitle">Frequência cardíaca</h2></div><span class="chart-unit">bpm</span></div>
+          <div class="chart" id="hrChart" role="img" aria-label="Gráfico de frequência cardíaca"></div>
+        </section>
+        <section class="monitor-chart" aria-labelledby="stepsChartTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Atividade diária</p><h2 id="stepsChartTitle">Passos</h2></div><span class="chart-unit">passos</span></div>
+          <div class="chart" id="stepsChart" role="img" aria-label="Gráfico de passos"></div>
+        </section>
+        <section class="monitor-table-panel">
+          <div class="monitor-section-head"><div><p class="eyebrow">Descanso</p><h2>Sessões de sono</h2></div><span class="pill pending">Estimativa</span></div>
+          <p class="muted sleep-note">Derivadas das amostras de atividade. A classificação das categorias ainda é provisória.</p>
+          <div class="table-wrap"><table><thead><tr><th>Início</th><th>Duração</th><th>Profundo</th><th>Leve</th><th>FC média</th></tr></thead><tbody id="sleepRows"></tbody></table></div>
+          <p class="muted" id="sleepEmpty">Sem amostras de sono para o período.</p>
+        </section>
+        <section class="monitor-table-panel">
+          <div class="monitor-section-head"><div><p class="eyebrow">Linha do tempo</p><h2>Eventos recentes</h2></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Quando</th><th>Evento</th><th>Detalhes</th></tr></thead><tbody id="eventRows"></tbody></table></div>
+          <p class="muted" id="eventsEmpty">Sem eventos no período.</p>
+        </section>
+      </div>
+      <p class="monitor-footnote">As séries mostram somente os dados recebidos e armazenados pela nuvem; períodos sem amostras permanecem vazios.</p>
+    </section>
+
     <!-- Termo -->
     <div data-panel="terms" class="hidden">
       <h1>Termo de participação</h1>
@@ -107,7 +166,10 @@
           <div><label for="cCred">Credencial</label><input id="cCred" required minlength="3" maxlength="120" autocomplete="off"></div>
           <div><label for="cName">Nome</label><input id="cName" required maxlength="120"></div>
           <div><label for="cPass">Senha (mín. 10)</label><input id="cPass" type="password" required minlength="10" autocomplete="new-password"></div>
-          <div><label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="cProv" style="width:auto;min-height:auto"> Autorizar instalações</label></div>
+          <div class="permission-options">
+            <label><input type="checkbox" id="cProv"> Autorizar instalações</label>
+            <label><input type="checkbox" id="cPanelRead"> Consultar dados no painel (somente leitura)</label>
+          </div>
           <div style="flex:0 0 auto"><button class="btn" type="submit">Criar</button></div>
         </form>
       </div>
