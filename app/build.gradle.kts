@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    // Capturas das telas Compose na JVM (verificação visual em 360/412 dp e fonte ampliada).
+    id("app.cash.paparazzi")
 }
 
 android {
@@ -15,11 +17,11 @@ android {
         versionCode = 2
         versionName = "2.0"
 
-        // Endereço do serviço BIOSENSE na nuvem (não é segredo). Defina com
-        // -Pbiosense.cloudUrl=https://... ou a variável de ambiente BIOSENSE_CLOUD_URL.
-        val cloudUrl = (project.findProperty("biosense.cloudUrl") as String?)
-            ?: System.getenv("BIOSENSE_CLOUD_URL")
-            ?: ""
+        // Endereço do serviço BIOSENSE na nuvem (não é segredo). Padrão: o domínio oficial;
+        // para testes use -Pbiosense.cloudUrl=... ou a variável de ambiente BIOSENSE_CLOUD_URL.
+        val cloudUrl = (project.findProperty("biosense.cloudUrl") as String?)?.takeIf { it.isNotBlank() }
+            ?: System.getenv("BIOSENSE_CLOUD_URL")?.takeIf { it.isNotBlank() }
+            ?: "https://biosense.deltabots.com.br"
         buildConfigField("String", "CLOUD_URL", "\"${cloudUrl.replace("\"", "")}\"")
     }
 

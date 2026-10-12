@@ -113,9 +113,30 @@ fun TechLoginScreen(onBack: () -> Unit, onAuthorized: () -> Unit, vm: TechLoginV
     var credential by rememberSaveable { mutableStateOf("") }
     // A senha não é salva no estado restaurável (nem em logs).
     var password by androidx.compose.runtime.remember { mutableStateOf("") }
+    TechLoginContent(
+        ui = ui,
+        credential = credential,
+        onCredential = { credential = it; vm.clearError() },
+        password = password,
+        onPassword = { password = it; vm.clearError() },
+        onSubmit = { vm.submit(credential, password) { password = ""; onAuthorized() } },
+        onBack = onBack,
+    )
+}
+
+@Composable
+fun TechLoginContent(
+    ui: LoginUi,
+    credential: String,
+    onCredential: (String) -> Unit,
+    password: String,
+    onPassword: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onBack: () -> Unit,
+) {
     var showPassword by androidx.compose.runtime.remember { mutableStateOf(false) }
     val canSubmit = credential.isNotBlank() && password.isNotEmpty() && !ui.sending
-    val submit = { vm.submit(credential, password) { password = ""; onAuthorized() } }
+    val submit = onSubmit
 
     ScreenLayout(onBack = onBack) {
         BiosenseCard {
@@ -124,7 +145,7 @@ fun TechLoginScreen(onBack: () -> Unit, onAuthorized: () -> Unit, vm: TechLoginV
                 ScreenTitle(stringResource(R.string.tech_login_title), stringResource(R.string.tech_login_subtitle))
                 OutlinedTextField(
                     value = credential,
-                    onValueChange = { credential = it; vm.clearError() },
+                    onValueChange = onCredential,
                     label = { Text(stringResource(R.string.tech_credential)) },
                     placeholder = { Text(stringResource(R.string.tech_credential_hint)) },
                     singleLine = true,
@@ -135,7 +156,7 @@ fun TechLoginScreen(onBack: () -> Unit, onAuthorized: () -> Unit, vm: TechLoginV
                 )
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it; vm.clearError() },
+                    onValueChange = onPassword,
                     label = { Text(stringResource(R.string.tech_password)) },
                     singleLine = true,
                     enabled = !ui.sending,

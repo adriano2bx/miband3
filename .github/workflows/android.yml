@@ -15,8 +15,14 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - name: Testes unitários
-        run: ./gradlew testDebugUnitTest
+      - name: Testes unitários e capturas das telas
+        run: ./gradlew recordPaparazziDebug
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: biosense-screens
+          path: app/src/test/snapshots/images/*.png
+          if-no-files-found: ignore
       - name: Gerar APK
         # Endereço do serviço: variável do repositório BIOSENSE_CLOUD_URL (Settings > Variables).
         env:

@@ -105,7 +105,7 @@ private fun openAppSettings(context: Context) {
 
 // ====================================================================== Etapa 1
 
-private enum class PermissionOutcome { UNKNOWN, DENIED, PERMANENTLY_DENIED }
+enum class PermissionOutcome { UNKNOWN, DENIED, PERMANENTLY_DENIED }
 
 @Composable
 fun SetupPrepareScreen(onReady: () -> Unit) {
@@ -132,24 +132,43 @@ fun SetupPrepareScreen(onReady: () -> Unit) {
         if (granted && btOn && outcome != PermissionOutcome.UNKNOWN) outcome = PermissionOutcome.UNKNOWN
     }
 
+    SetupPrepareContent(
+        bluetoothOn = btOn,
+        permissionGranted = granted,
+        outcome = outcome,
+        onPrimary = {
+            when {
+                !granted -> {
+                    val perms = bluetoothPermissions().toMutableList()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms += Manifest.permission.POST_NOTIFICATIONS
+                    requestPerms.launch(perms.toTypedArray())
+                }
+                !btOn -> enableBt.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+                else -> onReady()
+            }
+        },
+        onOpenSettings = { openAppSettings(context) },
+    )
+}
+
+@Composable
+fun SetupPrepareContent(
+    bluetoothOn: Boolean,
+    permissionGranted: Boolean,
+    outcome: PermissionOutcome,
+    onPrimary: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val btOn = bluetoothOn
+    val granted = permissionGranted
     ScreenLayout(
         bottom = {
             if (outcome == PermissionOutcome.PERMANENTLY_DENIED && !granted) {
-                PrimaryButton(stringResource(R.string.setup_open_settings), onClick = { openAppSettings(context) })
+                PrimaryButton(stringResource(R.string.setup_open_settings), onClick = onOpenSettings)
             } else {
                 PrimaryButton(
                     text = stringResource(if (granted && btOn) R.string.action_continue else R.string.setup_allow_continue),
-                    onClick = {
-                        when {
-                            !granted -> {
-                                val perms = bluetoothPermissions().toMutableList()
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) perms += Manifest.permission.POST_NOTIFICATIONS
-                                requestPerms.launch(perms.toTypedArray())
-                            }
-                            !btOn -> enableBt.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-                            else -> onReady()
-                        }
-                    },
+                    onClick = onPrimary,
                 )
             }
         },
@@ -219,20 +238,45 @@ fun SetupSelectScreen(onBack: () -> Unit, onConnect: () -> Unit) {
         if (selected != null && devices.none { it.address == selected } && !scanning) selected = null
     }
 
+    SetupSelectContent(
+        bluetoothOn = btOn,
+        scanning = scanning,
+        scanStarted = scanStarted,
+        addresses = devices.map { it.address },
+        selected = selected,
+        onSelect = { selected = it },
+        onBack = onBack,
+        onConnect = {
+            val address = selected ?: return@SetupSelectContent
+            MiBandManager.stopScan()
+            MiBandManager.connect(address, Branding.PRODUCT_NAME)
+            onConnect()
+        },
+        onRescan = {
+            selected = null
+            MiBandManager.startScan()
+        },
+    )
+}
+
+@Composable
+fun SetupSelectContent(
+    bluetoothOn: Boolean,
+    scanning: Boolean,
+    scanStarted: Boolean,
+    addresses: List<String>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+    onBack: () -> Unit,
+    onConnect: () -> Unit,
+    onRescan: () -> Unit,
+) {
+    val btOn = bluetoothOn
     ScreenLayout(
         onBack = onBack,
         bottom = {
-            PrimaryButton(
-                stringResource(R.string.setup2_connect),
-                onClick = {
-                    val address = selected ?: return@PrimaryButton
-                    MiBandManager.stopScan()
-                    MiBandManager.connect(address, Branding.PRODUCT_NAME)
-                    onConnect()
-                },
-                enabled = selected != null && btOn,
-            )
-            SecondaryButton(stringResource(R.string.setup2_rescan), onClick = { selected = null; MiBandManager.startScan() }, enabled = !scanning && btOn)
+            PrimaryButton(stringResource(R.string.setup2_connect), onClick = onConnect, enabled = selected != null && btOn)
+            SecondaryButton(stringResource(R.string.setup2_rescan), onClick = onRescan, enabled = !scanning && btOn)
         },
     ) {
         GuidedStepIndicator(2)
@@ -246,15 +290,15 @@ fun SetupSelectScreen(onBack: () -> Unit, onConnect: () -> Unit) {
                     Text(stringResource(R.string.setup2_searching), style = BType.body.copy(color = Tokens.TextSecondary))
                 }
             }
-            scanStarted && devices.isEmpty() -> NoticeCard(
+            scanStarted && addresses.isEmpty() -> NoticeCard(
                 Icons.Outlined.SearchOff, stringResource(R.string.setup2_none_title), stringResource(R.string.setup2_none_text),
                 tint = Tokens.Warning, background = Tokens.WarningSoft,
             )
         }
-        devices.forEach { device ->
-            val isSelected = selected == device.address
+        addresses.forEach { address ->
+            val isSelected = selected == address
             BiosenseCard(
-                modifier = Modifier.selectable(selected = isSelected, role = Role.RadioButton, onClick = { selected = device.address }),
+                modifier = Modifier.selectable(selected = isSelected, role = Role.RadioButton, onClick = { onSelect(address) }),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 48.dp)) {
                     RadioButton(selected = isSelected, onClick = null, colors = RadioButtonDefaults.colors(selectedColor = Tokens.Primary))
@@ -262,7 +306,7 @@ fun SetupSelectScreen(onBack: () -> Unit, onConnect: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(Branding.PRODUCT_NAME, style = BType.section)
                         // Final do endereço Bluetooth: distingue pulseiras sem dados pessoais.
-                        Text(stringResource(R.string.setup2_device_id, device.address.takeLast(5)), style = BType.secondary)
+                        Text(stringResource(R.string.setup2_device_id, address.takeLast(5)), style = BType.secondary)
                     }
                     Icon(Icons.Outlined.Bluetooth, contentDescription = null, tint = Tokens.Primary)
                 }
@@ -280,6 +324,22 @@ fun SetupSelectScreen(onBack: () -> Unit, onConnect: () -> Unit) {
 
 private const val HANDSHAKE_TIMEOUT_MS = 60_000L
 
+/** Estado mostrado na etapa 3 (derivado da pulseira e da nuvem). */
+data class ConfirmUi(
+    val bandReady: Boolean,
+    val awaitingTap: Boolean,
+    val authenticating: Boolean,
+    val failed: Boolean,
+    val timedOut: Boolean,
+    val hasErrorDetail: Boolean,
+    val serviceReady: Boolean,
+    val serviceConnecting: Boolean,
+    val serviceRejected: Boolean,
+    val serviceUnavailable: Boolean,
+    val authorized: Boolean,
+    val canFinish: Boolean,
+)
+
 @Composable
 fun SetupConfirmScreen(onBack: () -> Unit, onChooseAnother: () -> Unit, onFinished: () -> Unit) {
     val band by MiBandManager.state.collectAsStateWithLifecycle()
@@ -287,7 +347,6 @@ fun SetupConfirmScreen(onBack: () -> Unit, onChooseAnother: () -> Unit, onFinish
     val install by InstallationStore.state.collectAsStateWithLifecycle()
     var attemptStart by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var timedOut by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
 
     val bandReady = band.connection == ConnectionState.READY
     val serviceReady = cloud.status == CloudStatus.ONLINE
@@ -300,32 +359,52 @@ fun SetupConfirmScreen(onBack: () -> Unit, onChooseAnother: () -> Unit, onFinish
             if (MiBandManager.state.value.connection != ConnectionState.READY) timedOut = true
         }
     }
-    val retry = {
-        attemptStart = System.currentTimeMillis()
-        MiBandManager.connectSaved()
-    }
 
+    SetupConfirmContent(
+        ui = ConfirmUi(
+            bandReady = bandReady,
+            awaitingTap = band.awaitingTap,
+            authenticating = band.connection == ConnectionState.AUTHENTICATING,
+            failed = failed,
+            timedOut = timedOut,
+            hasErrorDetail = band.lastError != null,
+            serviceReady = serviceReady,
+            serviceConnecting = cloud.status == CloudStatus.CONNECTING && cloud.failures < 2,
+            serviceRejected = cloud.status == CloudStatus.REJECTED,
+            serviceUnavailable = cloud.failures >= 2,
+            authorized = install.authorized,
+            // Só com pulseira autenticada e serviço conectado; o vínculo (pulseira salva) já está persistido.
+            canFinish = bandReady && serviceReady && MiBandManager.savedAddress != null,
+        ),
+        onBack = onBack,
+        onRetry = {
+            attemptStart = System.currentTimeMillis()
+            MiBandManager.connectSaved()
+        },
+        onChooseAnother = {
+            MiBandManager.forget()
+            onChooseAnother()
+        },
+        onFinish = {
+            InstallationStore.update { it.copy(setupComplete = true) }
+            MiBandManager.keepTrying = true
+            CloudClient.start()
+            onFinished()
+        },
+    )
+}
+
+@Composable
+fun SetupConfirmContent(ui: ConfirmUi, onBack: () -> Unit, onRetry: () -> Unit, onChooseAnother: () -> Unit, onFinish: () -> Unit) {
+    val stuck = (ui.failed || ui.timedOut) && !ui.bandReady
     ScreenLayout(
         onBack = onBack,
         bottom = {
-            if ((failed || timedOut) && !bandReady) {
-                PrimaryButton(stringResource(R.string.action_retry), onClick = retry)
-                SecondaryButton(stringResource(R.string.setup3_choose_another), onClick = {
-                    MiBandManager.forget()
-                    onChooseAnother()
-                })
+            if (stuck) {
+                PrimaryButton(stringResource(R.string.action_retry), onClick = onRetry)
+                SecondaryButton(stringResource(R.string.setup3_choose_another), onClick = onChooseAnother)
             } else {
-                PrimaryButton(
-                    stringResource(R.string.setup3_finish),
-                    onClick = {
-                        InstallationStore.update { it.copy(setupComplete = true) }
-                        MiBandManager.keepTrying = true
-                        CloudClient.start()
-                        onFinished()
-                    },
-                    // Só com pulseira autenticada e serviço conectado; o vínculo (pulseira salva) já está persistido.
-                    enabled = bandReady && serviceReady && MiBandManager.savedAddress != null,
-                )
+                PrimaryButton(stringResource(R.string.setup3_finish), onClick = onFinish, enabled = ui.canFinish)
             }
         },
     ) {
@@ -334,54 +413,54 @@ fun SetupConfirmScreen(onBack: () -> Unit, onChooseAnother: () -> Unit, onFinish
             stringResource(R.string.setup3_title),
             stringResource(
                 when {
-                    bandReady -> R.string.setup3_subtitle_done
-                    band.awaitingTap -> R.string.setup3_subtitle_tap
+                    ui.bandReady -> R.string.setup3_subtitle_done
+                    ui.awaitingTap -> R.string.setup3_subtitle_tap
                     else -> R.string.setup3_subtitle_wait
                 },
             ),
         )
         // A ilustração só aparece quando o handshake real pede o toque na pulseira.
-        if (band.awaitingTap && !bandReady) TapIllustration()
+        if (ui.awaitingTap && !ui.bandReady) TapIllustration()
 
         BiosenseCard {
             StepRow(
-                done = bandReady,
-                running = !bandReady && !failed && !timedOut,
-                failed = (failed || timedOut) && !bandReady,
+                done = ui.bandReady,
+                running = !ui.bandReady && !ui.failed && !ui.timedOut,
+                failed = stuck,
                 title = stringResource(R.string.setup3_band_title),
                 detail = stringResource(
                     when {
-                        bandReady -> R.string.setup3_band_done
-                        band.awaitingTap -> R.string.setup3_band_tap
-                        timedOut -> R.string.setup3_band_timeout
-                        failed -> R.string.setup3_band_failed
-                        band.connection == ConnectionState.AUTHENTICATING -> R.string.setup3_band_authenticating
+                        ui.bandReady -> R.string.setup3_band_done
+                        ui.awaitingTap -> R.string.setup3_band_tap
+                        ui.timedOut -> R.string.setup3_band_timeout
+                        ui.failed -> R.string.setup3_band_failed
+                        ui.authenticating -> R.string.setup3_band_authenticating
                         else -> R.string.setup3_band_connecting
                     },
                 ),
             )
             CardDivider()
             StepRow(
-                done = serviceReady,
-                running = !serviceReady && cloud.status == CloudStatus.CONNECTING && cloud.failures < 2,
-                failed = cloud.status == CloudStatus.REJECTED,
+                done = ui.serviceReady,
+                running = !ui.serviceReady && ui.serviceConnecting,
+                failed = ui.serviceRejected,
                 title = stringResource(R.string.setup3_service_title),
                 detail = stringResource(
                     when {
-                        serviceReady && !install.authorized -> R.string.setup3_service_pending_authorization
-                        serviceReady -> R.string.setup3_service_done
-                        cloud.status == CloudStatus.REJECTED -> R.string.status_not_authorized_message
-                        cloud.failures >= 2 -> R.string.setup3_service_unavailable
+                        ui.serviceReady && !ui.authorized -> R.string.setup3_service_pending_authorization
+                        ui.serviceReady -> R.string.setup3_service_done
+                        ui.serviceRejected -> R.string.status_not_authorized_message
+                        ui.serviceUnavailable -> R.string.setup3_service_unavailable
                         else -> R.string.setup3_service_connecting
                     },
                 ),
             )
-            if (bandReady && serviceReady) {
+            if (ui.bandReady && ui.serviceReady) {
                 CardDivider()
                 Text(stringResource(R.string.setup3_ready), style = BType.secondary)
             }
         }
-        if (failed && band.lastError != null) {
+        if (ui.failed && ui.hasErrorDetail) {
             NoticeCard(Icons.Outlined.ErrorOutline, stringResource(R.string.setup3_band_failed), stringResource(R.string.setup3_failed_help))
         }
     }

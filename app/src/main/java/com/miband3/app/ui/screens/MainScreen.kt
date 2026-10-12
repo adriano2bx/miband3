@@ -59,6 +59,12 @@ import com.miband3.app.ui.theme.Tokens
 fun MainScreen(onSecretGesture: () -> Unit) {
     val status by StatusMonitor.status.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { StatusMonitor.refreshPermissions() }
+    MainContent(status, onSecretGesture)
+}
+
+/** Conteúdo sem estado (usado também nas capturas de tela dos testes). */
+@Composable
+fun MainContent(status: StatusKind, onSecretGesture: () -> Unit) {
     val detector = remember { SecretTapDetector() }
 
     Box(

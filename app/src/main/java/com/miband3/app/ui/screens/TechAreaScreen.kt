@@ -78,6 +78,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Estado do aparelho mostrado na área técnica (pulseira e conexão com a nuvem). */
+data class TechEnv(val service: CloudStatus, val bandReady: Boolean, val bandLabel: String, val bandAddress: String?)
+
+class TechActions(
+    val onSync: () -> Unit,
+    val onRetryLoad: () -> Unit,
+    val onAuthorize: (String) -> Unit,
+    val onRun: (TestId) -> Unit,
+)
+
 @Composable
 fun TechAreaScreen(
     onEnd: () -> Unit,
@@ -85,20 +95,47 @@ fun TechAreaScreen(
     vm: TechViewModel = viewModel(key = "tech-" + (TechSession.session.value?.token?.takeLast(12) ?: "none")),
 ) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val band by MiBandManager.state.collectAsStateWithLifecycle()
+    val cloud by CloudClient.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(1) }
+    TechAreaContent(
+        ui = ui,
+        env = TechEnv(cloud.status, band.connection == ConnectionState.READY, band.connection.label, band.address),
+        tab = tab,
+        onTab = { tab = it },
+        actions = TechActions(
+            onSync = { vm.loadConfig(sync = true) },
+            onRetryLoad = { vm.loadConfig() },
+            onAuthorize = vm::authorize,
+            onRun = vm::run,
+        ),
+        onEnd = { vm.endSession(); onEnd() },
+        onActivity = { TechSession.touch() },
+    )
+}
 
+@Composable
+fun TechAreaContent(
+    ui: TechUi,
+    env: TechEnv,
+    tab: Int,
+    onTab: (Int) -> Unit,
+    actions: TechActions,
+    onEnd: () -> Unit,
+    onActivity: () -> Unit,
+) {
     ScreenLayout(
-        onBack = { vm.endSession(); onEnd() },
+        onBack = onEnd,
         // Qualquer toque conta como atividade (sem consumir o evento).
         modifier = Modifier.pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
                     awaitPointerEvent(PointerEventPass.Initial)
-                    TechSession.touch()
+                    onActivity()
                 }
             }
         },
-        bottom = { SecondaryButton(stringResource(R.string.tech_end_session), onClick = { vm.endSession(); onEnd() }) },
+        bottom = { SecondaryButton(stringResource(R.string.tech_end_session), onClick = onEnd) },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(stringResource(R.string.tech_area_label), style = BType.secondary)
@@ -114,12 +151,12 @@ fun TechAreaScreen(
             listOf(R.string.tech_tab_config, R.string.tech_tab_tests).forEachIndexed { i, label ->
                 Tab(
                     selected = tab == i,
-                    onClick = { tab = i },
+                    onClick = { onTab(i) },
                     text = { Text(stringResource(label), style = BType.section.copy(color = if (tab == i) Tokens.Primary else Tokens.TextSecondary)) },
                 )
             }
         }
-        if (tab == 0) ConfigTab(ui, vm) else TestsTab(ui, vm)
+        if (tab == 0) ConfigTab(ui, env, actions) else TestsTab(ui, env, actions)
     }
 }
 
@@ -131,9 +168,8 @@ private fun hrLabel(minutes: Int): String =
     if (minutes == 0) stringResource(R.string.tech_hr_continuous) else stringResource(R.string.tech_every_min, minutes)
 
 @Composable
-private fun ServiceValue() {
-    val cloud by CloudClient.state.collectAsStateWithLifecycle()
-    val (label, color) = when (cloud.status) {
+private fun ServiceValue(status: CloudStatus) {
+    val (label, color) = when (status) {
         CloudStatus.ONLINE -> R.string.tech_service_online to Tokens.Primary
         CloudStatus.CONNECTING -> R.string.tech_service_connecting to Tokens.Warning
         CloudStatus.REJECTED -> R.string.tech_service_rejected to Tokens.Error
@@ -160,8 +196,7 @@ private fun SyncRow(syncing: Boolean, onSync: () -> Unit) {
 // ====================================================================== Configuração
 
 @Composable
-private fun ConfigTab(ui: TechUi, vm: TechViewModel) {
-    val band by MiBandManager.state.collectAsStateWithLifecycle()
+private fun ConfigTab(ui: TechUi, env: TechEnv, actions: TechActions) {
     when (val c = ui.config) {
         ConfigLoad.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Tokens.Primary)
@@ -170,14 +205,14 @@ private fun ConfigTab(ui: TechUi, vm: TechViewModel) {
         }
         is ConfigLoad.Failed -> NoticeCard(
             Icons.Outlined.ErrorOutline, stringResource(R.string.tech_config_failed), stringResource(c.message),
-            action = { SecondaryButton(stringResource(R.string.action_retry), onClick = { vm.loadConfig() }) },
+            action = { SecondaryButton(stringResource(R.string.action_retry), onClick = actions.onRetryLoad) },
         )
         is ConfigLoad.Loaded -> {
             val info = c.data.info
             BiosenseCard {
                 Text(stringResource(R.string.tech_installation_card), style = BType.section)
                 Spacer(Modifier.size(8.dp))
-                InfoRow(stringResource(R.string.tech_device), "${Branding.PRODUCT_NAME}${band.address?.let { " · ${it.takeLast(5)}" } ?: ""}")
+                InfoRow(stringResource(R.string.tech_device), "${Branding.PRODUCT_NAME}${env.bandAddress?.let { " · ${it.takeLast(5)}" } ?: ""}")
                 InfoRow(stringResource(R.string.tech_installation_id), info.deviceId ?: "—")
                 InfoRow(stringResource(R.string.tech_participant), info.participantRef ?: stringResource(R.string.tech_participant_none))
                 InfoRow(
@@ -196,8 +231,8 @@ private fun ConfigTab(ui: TechUi, vm: TechViewModel) {
                     if (info.consent.valid) stringResource(R.string.tech_consent_valid, info.consent.acceptedVersion ?: "—")
                     else stringResource(R.string.tech_consent_invalid, info.consent.currentVersion ?: "—"),
                 )
-                ServiceValue()
-                InfoRow(stringResource(R.string.tech_band_state), band.connection.label)
+                ServiceValue(env.service)
+                InfoRow(stringResource(R.string.tech_band_state), env.bandLabel)
                 InfoRow(stringResource(R.string.tech_technician), c.data.technicianName)
             }
             BiosenseCard {
@@ -216,15 +251,15 @@ private fun ConfigTab(ui: TechUi, vm: TechViewModel) {
                 InfoRow(stringResource(R.string.tech_profile_updated), formatDate(info.configUpdatedAt))
                 InfoRow(stringResource(R.string.tech_profile_synced), formatDate(c.syncedAtMs))
                 CardDivider()
-                SyncRow(ui.syncing) { vm.loadConfig(sync = true) }
+                SyncRow(ui.syncing, actions.onSync)
             }
-            if (info.status == "pending") AuthorizeCard(ui, vm, canProvision = "provision" in c.data.scopes)
+            if (info.status == "pending") AuthorizeCard(ui, actions, canProvision = "provision" in c.data.scopes)
         }
     }
 }
 
 @Composable
-private fun AuthorizeCard(ui: TechUi, vm: TechViewModel, canProvision: Boolean) {
+private fun AuthorizeCard(ui: TechUi, actions: TechActions, canProvision: Boolean) {
     var ref by rememberSaveable { mutableStateOf("") }
     BiosenseCard {
         Text(stringResource(R.string.tech_authorize_title), style = BType.section)
@@ -244,7 +279,7 @@ private fun AuthorizeCard(ui: TechUi, vm: TechViewModel, canProvision: Boolean) 
             Spacer(Modifier.size(12.dp))
             PrimaryButton(
                 stringResource(R.string.tech_authorize_action),
-                onClick = { vm.authorize(ref) },
+                onClick = { actions.onAuthorize(ref) },
                 enabled = ref.isNotBlank(),
                 loading = ui.authorize == AuthorizeState.SAVING,
             )
@@ -259,10 +294,8 @@ private fun AuthorizeCard(ui: TechUi, vm: TechViewModel, canProvision: Boolean) 
 // ====================================================================== Testes
 
 @Composable
-private fun TestsTab(ui: TechUi, vm: TechViewModel) {
-    val band by MiBandManager.state.collectAsStateWithLifecycle()
-    val cloud by CloudClient.state.collectAsStateWithLifecycle()
-    val ready = band.connection == ConnectionState.READY
+private fun TestsTab(ui: TechUi, env: TechEnv, actions: TechActions) {
+    val ready = env.bandReady
     val loaded = ui.config as? ConfigLoad.Loaded
 
     BiosenseCard {
@@ -273,30 +306,30 @@ private fun TestsTab(ui: TechUi, vm: TechViewModel) {
             stringResource(R.string.tech_collection),
             loaded?.data?.info?.config?.let { stringResource(R.string.tech_collection_value, hrLabel(it.hrIntervalMin)) } ?: stringResource(R.string.tech_collection_unknown),
         )
-        ServiceValue()
+        ServiceValue(env.service)
         CardDivider()
-        SyncRow(ui.syncing) { vm.loadConfig(sync = true) }
+        SyncRow(ui.syncing, actions.onSync)
     }
 
     SectionLabel(stringResource(R.string.tech_tests_title))
     BiosenseCard(padding = 8.dp) {
         val unavailable = stringResource(R.string.test_band_not_ready)
-        TestRow(Icons.Outlined.Bluetooth, R.string.test_bluetooth, R.string.test_action_check, ui.tests.getValue(TestId.BLUETOOTH), enabled = true) { vm.run(TestId.BLUETOOTH) }
+        TestRow(Icons.Outlined.Bluetooth, R.string.test_bluetooth, R.string.test_action_check, ui.tests.getValue(TestId.BLUETOOTH), enabled = true) { actions.onRun(TestId.BLUETOOTH) }
         CardDivider()
         TestRow(
             Icons.Outlined.Vibration, R.string.test_vibration, R.string.test_action_test, ui.tests.getValue(TestId.VIBRATION),
             enabled = ready && System.currentTimeMillis() >= ui.vibrationCooldownUntil,
             disabledReason = if (!ready) unavailable else null,
-        ) { vm.run(TestId.VIBRATION) }
+        ) { actions.onRun(TestId.VIBRATION) }
         CardDivider()
-        TestRow(Icons.Outlined.FavoriteBorder, R.string.test_heart_rate, R.string.test_action_measure, ui.tests.getValue(TestId.HEART_RATE), enabled = ready, disabledReason = if (!ready) unavailable else null) { vm.run(TestId.HEART_RATE) }
+        TestRow(Icons.Outlined.FavoriteBorder, R.string.test_heart_rate, R.string.test_action_measure, ui.tests.getValue(TestId.HEART_RATE), enabled = ready, disabledReason = if (!ready) unavailable else null) { actions.onRun(TestId.HEART_RATE) }
         CardDivider()
-        TestRow(Icons.Outlined.Description, R.string.test_history, R.string.test_action_sync, ui.tests.getValue(TestId.HISTORY), enabled = ready, disabledReason = if (!ready) unavailable else null) { vm.run(TestId.HISTORY) }
+        TestRow(Icons.Outlined.Description, R.string.test_history, R.string.test_action_sync, ui.tests.getValue(TestId.HISTORY), enabled = ready, disabledReason = if (!ready) unavailable else null) { actions.onRun(TestId.HISTORY) }
         CardDivider()
         TestRow(
             Icons.Outlined.CloudQueue, R.string.test_cloud, R.string.test_action_test, ui.tests.getValue(TestId.CLOUD),
-            enabled = cloud.status != CloudStatus.DISABLED,
-        ) { vm.run(TestId.CLOUD) }
+            enabled = env.service != CloudStatus.DISABLED,
+        ) { actions.onRun(TestId.CLOUD) }
     }
 
     BiosenseCard {

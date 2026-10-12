@@ -166,13 +166,32 @@ class ConsentViewModel : ViewModel() {
 @Composable
 fun ConsentScreen(onAccepted: () -> Unit, onDeclined: () -> Unit, onReadTerm: () -> Unit, vm: ConsentViewModel = viewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    ConsentContent(
+        ui = ui,
+        onCheckedChange = vm::setChecked,
+        onAccept = { vm.accept(onAccepted) },
+        onDecline = { vm.decline(onDeclined) },
+        onReadTerm = onReadTerm,
+        onRetry = vm::load,
+    )
+}
+
+@Composable
+fun ConsentContent(
+    ui: ConsentUiState,
+    onCheckedChange: (Boolean) -> Unit,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    onReadTerm: () -> Unit,
+    onRetry: () -> Unit,
+) {
     val term = (ui.term as? TermLoad.Loaded)?.term
 
     ScreenLayout(
         bottom = {
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                    .toggleable(value = ui.checked, enabled = term != null && !ui.submitting, role = Role.Checkbox, onValueChange = vm::setChecked),
+                    .toggleable(value = ui.checked, enabled = term != null && !ui.submitting, role = Role.Checkbox, onValueChange = onCheckedChange),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Checkbox(
@@ -186,11 +205,11 @@ fun ConsentScreen(onAccepted: () -> Unit, onDeclined: () -> Unit, onReadTerm: ()
             }
             PrimaryButton(
                 text = stringResource(R.string.consent_accept),
-                onClick = { vm.accept(onAccepted) },
+                onClick = onAccept,
                 enabled = term != null && ui.checked,
                 loading = ui.submitting,
             )
-            SecondaryButton(text = stringResource(R.string.consent_decline), onClick = { vm.decline(onDeclined) }, enabled = !ui.submitting)
+            SecondaryButton(text = stringResource(R.string.consent_decline), onClick = onDecline, enabled = !ui.submitting)
         },
     ) {
         ScreenTitle(stringResource(R.string.consent_title), stringResource(R.string.consent_subtitle))
@@ -238,7 +257,7 @@ fun ConsentScreen(onAccepted: () -> Unit, onDeclined: () -> Unit, onReadTerm: ()
                 message = stringResource(message),
                 tint = Tokens.Warning,
                 background = Tokens.WarningSoft,
-                action = { SecondaryButton(stringResource(R.string.action_retry), onClick = vm::load) },
+                action = { SecondaryButton(stringResource(R.string.action_retry), onClick = onRetry) },
             )
         }
 
