@@ -75,7 +75,7 @@ class MiBandServiceTest {
 
     @Test
     fun serviceRecreatedWithoutBluetoothPermissionStopsWithoutRestarting() {
-        shadowOf(RuntimeEnvironment.getApplication<Application>()).denyPermissions(
+        shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(
             Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN,
         )
         val controller = Robolectric.buildService(MiBandService::class.java).create()
