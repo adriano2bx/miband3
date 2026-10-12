@@ -155,3 +155,17 @@ Eventos: `alert.created`, `device.online`, `device.offline`, `command.updated`, 
 - **Escala.** A FC contínua gera ~1 linha/s por paciente no D1. Para dezenas de pacientes é tranquilo; para milhares, agregue ou reduza a resolução antes de gravar (ponto óbvio de evolução em `DeviceHub.ingest`). O `Fleet` é um objeto único (~1 000 req/s de repasse).
 - **Dados de saúde são sensíveis (LGPD).** Use HTTPS (padrão no Workers), chaves restritas por paciente, defina `RETENTION_DAYS` e obtenha o consentimento do paciente. O D1 não é criptografado por campo.
 - Sem limitação de taxa (rate limit) por chave — configure regras na Cloudflare (WAF/Rate Limiting) à frente do Worker se expuser a API publicamente.
+
+## Interface administrativa
+
+O frontend de `/admin/` usa HTML, CSS e JavaScript reais, com dados e ações pela API existente. A identidade BIOSENSE/Deltabots inclui tema claro, lista de instalações com detalhe selecionável e o asset local `public/admin/assets/biosense-pulse.png`. Os contadores representam os registros carregados do filtro atual; quando há outra página, use **Carregar mais**. O horário junto de **Atualizar** indica a última consulta bem-sucedida. A janela de comandos atualiza o estado a cada 2,5 segundos.
+
+Validação da interface (fixtures sintéticas restritas aos testes, sem acesso à nuvem):
+
+```bash
+npm ci
+npx playwright install --with-deps chromium
+npm run test:admin
+```
+
+Os testes verificam seleção por teclado, paginação, filtros, estados de erro, contratos de configuração/autorização/vibração, navegação e layout móvel. Capturas de navegador ficam em `test-results/`. `npm test` continua executando os testes da API; `npm run typecheck` verifica o serviço. A publicação segue o workflow de deploy existente, incluindo os arquivos estáticos de `public/`.

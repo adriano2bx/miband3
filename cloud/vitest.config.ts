@@ -13,6 +13,6 @@ export default defineConfig(async () => {
         },
       }),
     ],
-    test: { setupFiles: ["./test/setup.ts"], testTimeout: 20_000 },
+    test: { include: ["test/**/*.test.ts"], setupFiles: ["./test/setup.ts"], testTimeout: 20_000 },
   };
 });
