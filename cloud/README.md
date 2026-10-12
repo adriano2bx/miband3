@@ -48,7 +48,7 @@ curl $API/v1/devices/dev_xxx/status -H "$H"
 curl -X POST $API/v1/devices/dev_xxx/vibrate -H "$H" -H 'content-type: application/json' -d '{"count":3}'
 ```
 
-A especificação completa está em **`GET /v1/openapi.json`** (sem autenticação; importe no Swagger/Postman).
+A documentação interativa (Swagger) fica em **`/docs/`** (link no painel); a especificação OpenAPI está em `GET /v1/openapi.json` (importável no Postman). Um teste garante que toda rota da API está documentada.
 
 ## Participantes (BIOSENSE)
 
