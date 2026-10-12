@@ -10,7 +10,8 @@ export { Fleet } from "./fleet";
 const app = new Hono<AppEnv>();
 app.use("/v1/*", cors({ origin: "*", allowHeaders: ["authorization", "content-type"], allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"], maxAge: 86400 }));
 app.route("/", api);
-app.get("/", (c) => c.json({ name: "miband3-cloud", docs: "/v1/openapi.json" }));
+// A raiz leva ao painel; a API fica em /v1 (documentação em /v1/openapi.json).
+app.get("/", (c) => c.redirect("/admin/", 302));
 
 export default {
   fetch: app.fetch,

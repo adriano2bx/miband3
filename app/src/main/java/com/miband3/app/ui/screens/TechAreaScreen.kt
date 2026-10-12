@@ -206,6 +206,11 @@ private fun ConfigTab(ui: TechUi, vm: TechViewModel) {
                 info.config?.let { cfg ->
                     InfoRow(stringResource(R.string.tech_profile_hr), hrLabel(cfg.hrIntervalMin))
                     InfoRow(stringResource(R.string.tech_profile_history), stringResource(R.string.tech_every_min, cfg.historyIntervalMin))
+                    InfoRow(
+                        stringResource(R.string.tech_profile_band),
+                        cfg.bandProfile?.let { stringResource(R.string.tech_profile_band_value, it.heightCm, it.weightKg, it.birthYear) }
+                            ?: stringResource(R.string.tech_profile_band_default),
+                    )
                 }
                 InfoRow(stringResource(R.string.tech_profile_version), (info.configVersion ?: 0).toString())
                 InfoRow(stringResource(R.string.tech_profile_updated), formatDate(info.configUpdatedAt))

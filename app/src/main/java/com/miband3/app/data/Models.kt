@@ -7,7 +7,17 @@ data class Term(val version: String, val title: String, val content: String, val
 
 data class ConsentInfo(val acceptedVersion: String?, val currentVersion: String?, val valid: Boolean)
 
-data class CollectionConfig(val hrIntervalMin: Int, val historyIntervalMin: Int)
+/** Perfil físico que a pulseira usa para estimar calorias e distância. */
+data class BandProfileInfo(
+    val birthYear: Int,
+    val gender: String,
+    val heightCm: Int,
+    val weightKg: Int,
+    val leftWrist: Boolean,
+    val stepGoal: Int,
+)
+
+data class CollectionConfig(val hrIntervalMin: Int, val historyIntervalMin: Int, val bandProfile: BandProfileInfo? = null)
 
 data class InstallationInfo(
     val deviceId: String?,
@@ -60,7 +70,22 @@ object Parsers {
                 currentVersion = consent?.optStringOrNull("current_version"),
                 valid = consent?.optBoolean("valid", false) ?: false,
             ),
-            config = config?.let { CollectionConfig(it.optInt("hr_interval_min", 30), it.optInt("history_interval_min", 30)) },
+            config = config?.let { c ->
+                CollectionConfig(
+                    hrIntervalMin = c.optInt("hr_interval_min", 30),
+                    historyIntervalMin = c.optInt("history_interval_min", 30),
+                    bandProfile = c.optJSONObject("band_profile")?.let { p ->
+                        BandProfileInfo(
+                            birthYear = p.optInt("birth_year", 1990),
+                            gender = p.optString("gender", "other"),
+                            heightCm = p.optInt("height_cm", 170),
+                            weightKg = p.optInt("weight_kg", 70),
+                            leftWrist = p.optString("wrist", "left") != "right",
+                            stepGoal = p.optInt("step_goal", 8000),
+                        )
+                    },
+                )
+            },
             configVersion = if (json.has("config_version")) json.optInt("config_version") else null,
             configUpdatedAt = json.optLongOrNull("config_updated_at"),
             online = if (json.has("online")) json.optBoolean("online") else null,

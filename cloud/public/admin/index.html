@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'">
+<title>BIOSENSE · Administração</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 200 240%27%3E%3Cpath fill=%27%23126C64%27 d=%27M20 12L100 12C160 12 184 66 152 120C118 78 50 66 20 12Z%27/%3E%3Cpath fill=%27%23126C64%27 d=%27M152 120C194 170 176 228 110 228L20 228C54 170 114 163 152 120Z%27/%3E%3Ccircle fill=%27%23126C64%27 cx=%2765%27 cy=%27120%27 r=%2729%27/%3E%3C/svg%3E">
+<style>
+  :root {
+    --primary: #126C64; --primary-soft: #E7F1EF; --bg: #F6F8F7; --surface: #FFFFFF;
+    --text: #121A1D; --text-2: #52615F; --outline: #DCE4E2; --error: #B3261E; --error-soft: #F9E9E8;
+    --warning: #8A5A00; --warning-soft: #F6EEDF;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/20px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 0 20px; min-height: 60px; background: var(--surface); border-bottom: 1px solid var(--outline); position: sticky; top: 0; z-index: 2; }
+  header svg { width: 22px; height: 26px; flex: none; }
+  .brand b { display: block; font-size: 17px; letter-spacing: .5px; }
+  .brand small { color: var(--text-2); font-size: 11px; letter-spacing: 1px; }
+  header .spacer { flex: 1; }
+  header .who { color: var(--text-2); font-size: 12px; }
+  nav { display: flex; gap: 4px; padding: 0 20px; background: var(--surface); border-bottom: 1px solid var(--outline); overflow-x: auto; }
+  nav button { border: 0; background: none; padding: 12px 14px; font: inherit; font-weight: 500; color: var(--text-2); border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+  nav button[aria-selected="true"] { color: var(--primary); border-bottom-color: var(--primary); }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 20px; line-height: 26px; margin: 0 0 4px; font-weight: 600; }
+  h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+  p.sub { color: var(--text-2); margin: 0 0 16px; }
+  .card { background: var(--surface); border: 1px solid var(--outline); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; }
+  .row > * { flex: 1 1 180px; }
+  label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+  input, select, textarea { width: 100%; font: inherit; color: var(--text); padding: 10px 12px; border: 1px solid var(--outline); border-radius: 8px; background: var(--surface); min-height: 44px; }
+  textarea { min-height: 220px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+  button.btn { font: inherit; font-weight: 500; min-height: 40px; padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--primary); background: var(--primary); color: #fff; }
+  button.btn.secondary { background: var(--surface); color: var(--primary); }
+  button.btn.danger { background: var(--surface); color: var(--error); border-color: var(--error); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  button.link { border: 0; background: none; color: var(--primary); font: inherit; cursor: pointer; padding: 6px 4px; text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--outline); vertical-align: top; }
+  th { font-size: 12px; color: var(--text-2); font-weight: 500; }
+  td .muted, .muted { color: var(--text-2); font-size: 12px; }
+  .table-wrap { overflow-x: auto; }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 10px; border-radius: 99px; background: var(--outline); color: var(--text); }
+  .pill.active { background: var(--primary-soft); color: var(--primary); }
+  .pill.pending { background: var(--warning-soft); color: var(--warning); }
+  .pill.revoked { background: var(--error-soft); color: var(--error); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--outline); margin-right: 6px; }
+  .dot.on { background: var(--primary); }
+  .actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .notice { padding: 12px 14px; border-radius: 8px; margin-bottom: 16px; }
+  .notice.error { background: var(--error-soft); color: var(--error); }
+  .notice.ok { background: var(--primary-soft); color: var(--primary); }
+  .notice.warn { background: var(--warning-soft); color: var(--warning); }
+  .hidden { display: none !important; }
+  dialog { border: 1px solid var(--outline); border-radius: 12px; padding: 20px; max-width: 560px; width: calc(100% - 32px); }
+  dialog::backdrop { background: rgba(18, 26, 29, .35); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } main { padding: 16px; } }
+  pre.term { white-space: pre-wrap; font: inherit; margin: 0; max-height: 360px; overflow: auto; }
+  footer { color: var(--text-2); font-size: 11px; text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 200 240" aria-hidden="true"><path fill="#126C64" d="M 20 12 L 100 12 C 160 12 184 66 152 120 C 118 78 50 66 20 12 Z"/><path fill="#126C64" d="M 152 120 C 194 170 176 228 110 228 L 20 228 C 54 170 114 163 152 120 Z"/><circle fill="#126C64" cx="65" cy="120" r="29"/></svg>
+  <div class="brand"><b>BIOSENSE</b><small>by DELTABOTS</small></div>
+  <div class="spacer"></div>
+  <span class="who" id="who"></span>
+  <button class="btn secondary hidden" id="logout">Sair</button>
+</header>
+
+<section id="login" class="hidden">
+  <main>
+    <div class="card" style="max-width:480px;margin:40px auto">
+      <h1>Administração</h1>
+      <p class="sub">Use a chave mestra (ADMIN_API_KEY) ou uma chave de API com escopo de gestão. A chave fica só nesta aba do navegador.</p>
+      <form id="loginForm">
+        <label for="key">Chave de acesso</label>
+        <input id="key" type="password" autocomplete="off" required>
+        <div style="margin-top:12px"><button class="btn" type="submit">Entrar</button></div>
+      </form>
+      <div id="loginMsg"></div>
+    </div>
+  </main>
+</section>
+
+<section id="app" class="hidden">
+  <nav role="tablist">
+    <button role="tab" data-tab="installs" aria-selected="true">Instalações</button>
+    <button role="tab" data-tab="terms">Termo de participação</button>
+    <button role="tab" data-tab="techs">Técnicos</button>
+    <button role="tab" data-tab="alerts">Alertas</button>
+  </nav>
+  <main>
+    <div id="flash"></div>
+
+    <!-- Instalações -->
+    <div data-panel="installs">
+      <h1>Instalações</h1>
+      <p class="sub">Cada instalação nasce pendente quando o participante aceita o termo no app. Autorize vinculando a referência do participante (código, não o nome).</p>
+      <div class="card">
+        <div class="row">
+          <div><label for="fStatus">Situação</label>
+            <select id="fStatus"><option value="">Todas</option><option value="pending">Pendentes</option><option value="active">Autorizadas</option><option value="revoked">Bloqueadas</option></select></div>
+          <div><label for="fQ">Buscar (referência ou nome)</label><input id="fQ" type="search"></div>
+          <div style="flex:0 0 auto"><button class="btn secondary" id="reload">Atualizar</button></div>
+        </div>
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Instalação</th><th>Participante</th><th>Situação</th><th>Conexão</th><th>Consentimento</th><th>Coleta</th><th>Ações</th></tr></thead>
+          <tbody id="installs"></tbody>
+        </table>
+        <p class="muted" id="installsEmpty"></p>
+      </div>
+    </div>
+
+    <!-- Termo -->
+    <div data-panel="terms" class="hidden">
+      <h1>Termo de participação</h1>
+      <p class="sub">O app só permite aderir com um termo publicado. Versões publicadas não são editadas: para mudar o texto, publique uma nova versão.</p>
+      <div class="card" id="currentTerm"></div>
+      <div class="card">
+        <h2>Publicar nova versão</h2>
+        <form id="termForm">
+          <div class="grid2">
+            <div><label for="tVersion">Versão</label><input id="tVersion" required maxlength="64" placeholder="ex.: 2026.1"></div>
+            <div><label for="tTitle">Título</label><input id="tTitle" required maxlength="200" value="Termo de participação voluntária — BIOSENSE"></div>
+          </div>
+          <div style="margin-top:12px"><label for="tContent">Texto completo (revisado pela equipe responsável)</label><textarea id="tContent" required minlength="20"></textarea></div>
+          <label style="display:flex;gap:8px;align-items:center;margin-top:12px;color:var(--text)"><input type="checkbox" id="tReconsent" checked style="width:auto;min-height:auto"> Exigir novo aceite de quem aceitou versões anteriores</label>
+          <div style="margin-top:12px"><button class="btn" type="submit">Publicar</button></div>
+        </form>
+      </div>
+      <div class="card table-wrap"><h2>Versões publicadas</h2><table><thead><tr><th>Versão</th><th>Título</th><th>Novo aceite</th><th>Publicado em</th></tr></thead><tbody id="terms"></tbody></table></div>
+    </div>
+
+    <!-- Técnicos -->
+    <div data-panel="techs" class="hidden">
+      <h1>Técnicos</h1>
+      <p class="sub">Acesso à área técnica do app (5 toques na tela principal). "Autorizar instalações" permite vincular participantes pelo app.</p>
+      <div class="card">
+        <h2>Novo técnico</h2>
+        <form id="techForm" class="row">
+          <div><label for="cCred">Credencial</label><input id="cCred" required minlength="3" maxlength="120" autocomplete="off"></div>
+          <div><label for="cName">Nome</label><input id="cName" required maxlength="120"></div>
+          <div><label for="cPass">Senha (mín. 10)</label><input id="cPass" type="password" required minlength="10" autocomplete="new-password"></div>
+          <div><label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="cProv" style="width:auto;min-height:auto"> Autorizar instalações</label></div>
+          <div style="flex:0 0 auto"><button class="btn" type="submit">Criar</button></div>
+        </form>
+      </div>
+      <div class="card table-wrap"><table><thead><tr><th>Técnico</th><th>Credencial</th><th>Permissões</th><th>Situação</th><th>Ações</th></tr></thead><tbody id="techs"></tbody></table></div>
+    </div>
+
+    <!-- Alertas -->
+    <div data-panel="alerts" class="hidden">
+      <h1>Alertas</h1>
+      <p class="sub">Alertas disparados pelas regras configuradas na API (/v1/alert-rules) nos últimos 7 dias.</p>
+      <div class="card table-wrap"><table><thead><tr><th>Quando</th><th>Instalação</th><th>Gravidade</th><th>Mensagem</th><th></th></tr></thead><tbody id="alerts"></tbody></table><p class="muted" id="alertsEmpty"></p></div>
+    </div>
+  </main>
+  <footer>Deltabots · BIOSENSE</footer>
+</section>
+
+<!-- Diálogo: perfil de coleta -->
+<dialog id="cfgDialog">
+  <form method="dialog" id="cfgForm">
+    <h1>Perfil de coleta</h1>
+    <p class="sub" id="cfgFor"></p>
+    <div class="grid2">
+      <div><label for="cfgHr">Frequência cardíaca</label>
+        <select id="cfgHr"><option value="5">A cada 5 min</option><option value="10">A cada 10 min</option><option value="15">A cada 15 min</option><option value="30">A cada 30 min</option><option value="60">A cada 1 h</option><option value="120">A cada 2 h</option><option value="0">Contínua (gasta mais bateria)</option></select></div>
+      <div><label for="cfgHist">Histórico da pulseira (min)</label><input id="cfgHist" type="number" min="15" max="240" required></div>
+    </div>
+    <h2 style="margin-top:16px">Perfil físico na pulseira</h2>
+    <p class="muted">Usado pela pulseira para estimar calorias e distância. Deixe em branco para manter o padrão.</p>
+    <div class="grid2">
+      <div><label for="pYear">Ano de nascimento</label><input id="pYear" type="number" min="1900" max="2030"></div>
+      <div><label for="pGender">Sexo</label><select id="pGender"><option value="">—</option><option value="female">Feminino</option><option value="male">Masculino</option><option value="other">Outro</option></select></div>
+      <div><label for="pHeight">Altura (cm)</label><input id="pHeight" type="number" min="50" max="250"></div>
+      <div><label for="pWeight">Peso (kg)</label><input id="pWeight" type="number" min="20" max="300"></div>
+      <div><label for="pWrist">Pulso</label><select id="pWrist"><option value="left">Esquerdo</option><option value="right">Direito</option></select></div>
+      <div><label for="pGoal">Meta de passos</label><input id="pGoal" type="number" min="1000" max="50000" value="8000"></div>
+    </div>
+    <div id="cfgMsg"></div>
+    <div class="actions" style="margin-top:16px;justify-content:flex-end">
+      <button class="btn secondary" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn" id="cfgSave" value="save">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo: consentimentos -->
+<dialog id="consDialog">
+  <h1>Consentimentos</h1>
+  <p class="sub" id="consFor"></p>
+  <div class="table-wrap"><table><thead><tr><th>Quando</th><th>Versão</th><th>Decisão</th></tr></thead><tbody id="consents"></tbody></table></div>
+  <div class="actions" style="margin-top:16px;justify-content:flex-end"><button class="btn secondary" onclick="this.closest('dialog').close()">Fechar</button></div>
+</dialog>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const KEY = "biosense.admin.key";
+let apiKey = sessionStorage.getItem(KEY) || "";
+let devices = [];
+
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined) e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return e;
+}
+const fmt = (ms) => (ms ? new Date(ms).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: { authorization: `Bearer ${apiKey}`, ...(body ? { "content-type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let json = null;
+  try { json = await res.json(); } catch { /* sem corpo */ }
+  if (res.status === 401) { logout("Sessão inválida. Entre novamente."); throw new Error("unauthorized"); }
+  if (!res.ok) throw new Error(json?.message || json?.error || `Erro ${res.status}`);
+  return json;
+}
+
+function flash(text, kind = "ok") {
+  const box = $("#flash");
+  box.replaceChildren(el("div", { class: `notice ${kind}`, role: kind === "error" ? "alert" : "status" }, text));
+  if (kind === "ok") setTimeout(() => { if (box.firstChild?.textContent === text) box.replaceChildren(); }, 5000);
+}
+const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { if (e.message !== "unauthorized") flash(e.message, "error"); } };
+
+// ------------------------------------------------------------------ sessão
+function logout(msg) {
+  apiKey = ""; sessionStorage.removeItem(KEY);
+  $("#app").classList.add("hidden"); $("#logout").classList.add("hidden"); $("#who").textContent = "";
+  $("#login").classList.remove("hidden");
+  $("#loginMsg").replaceChildren(msg ? el("div", { class: "notice error", style: "margin-top:12px" }, msg) : "");
+}
+async function start() {
+  if (!apiKey) return logout();
+  try {
+    const me = await api("GET", "/v1/me");
+    if (!me.scopes.includes("manage")) return logout("Esta chave não tem permissão de gestão.");
+    $("#who").textContent = me.id === "admin" ? "Chave mestra" : me.id;
+    $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden");
+    loadInstalls();
+  } catch (e) { if (e.message !== "unauthorized") logout(e.message); }
+}
+$("#loginForm").addEventListener("submit", (e) => { e.preventDefault(); apiKey = $("#key").value.trim(); sessionStorage.setItem(KEY, apiKey); $("#key").value = ""; start(); });
+$("#logout").addEventListener("click", () => logout());
+
+// ------------------------------------------------------------------ abas
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+  document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
+  $("#flash").replaceChildren();
+  ({ installs: loadInstalls, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
+}));
+
+// ------------------------------------------------------------------ instalações
+const statusLabel = { pending: "Pendente", active: "Autorizada", revoked: "Bloqueada" };
+const hrLabel = (m) => (m === 0 ? "FC contínua" : `FC a cada ${m} min`);
+
+const loadInstalls = guard(async () => {
+  const params = new URLSearchParams({ limit: "500" });
+  if ($("#fStatus").value) params.set("status", $("#fStatus").value);
+  if ($("#fQ").value.trim()) params.set("q", $("#fQ").value.trim());
+  const { data } = await api("GET", `/v1/devices?${params}`);
+  devices = data;
+  const rows = data.map((d) => el("tr", {},
+    el("td", {}, el("div", {}, d.id), el("div", { class: "muted" }, `Criada ${fmt(d.created_at)}`)),
+    el("td", {}, d.patient_ref || el("span", { class: "muted" }, "Não vinculado")),
+    el("td", {}, el("span", { class: `pill ${d.status}` }, statusLabel[d.status] || d.status)),
+    el("td", {}, el("span", { class: `dot ${d.online ? "on" : ""}` }), d.online ? "Online" : "Offline", el("div", { class: "muted" }, `Visto ${fmt(d.last_seen_at)}`)),
+    el("td", {}, d.consent_version ? `Versão ${d.consent_version}` : el("span", { class: "muted" }, "Sem aceite válido"), el("div", {}, el("button", { class: "link", onclick: () => showConsents(d) }, "Histórico"))),
+    el("td", {}, hrLabel(d.config.hr_interval_min), el("div", { class: "muted" }, `v${d.config_version}${d.config.band_profile ? " · perfil físico" : ""}`)),
+    el("td", {}, el("div", { class: "actions" },
+      d.status !== "active" ? el("button", { class: "btn", onclick: () => authorize(d) }, "Autorizar") : null,
+      el("button", { class: "btn secondary", onclick: () => editConfig(d) }, "Coleta"),
+      d.status !== "revoked" ? el("button", { class: "btn danger", onclick: () => revoke(d) }, "Bloquear") : null,
+    )),
+  ));
+  $("#installs").replaceChildren(...rows);
+  $("#installsEmpty").textContent = data.length ? "" : "Nenhuma instalação encontrada.";
+});
+$("#reload").addEventListener("click", loadInstalls);
+$("#fStatus").addEventListener("change", loadInstalls);
+$("#fQ").addEventListener("keydown", (e) => { if (e.key === "Enter") loadInstalls(); });
+
+const authorize = guard(async (d) => {
+  const ref = prompt(`Referência do participante para ${d.id} (código, não o nome):`, d.patient_ref || "");
+  if (ref === null) return;
+  if (!ref.trim()) return flash("Informe a referência do participante.", "error");
+  await api("POST", `/v1/devices/${encodeURIComponent(d.id)}/authorize`, { participant_ref: ref.trim() });
+  flash(`Instalação ${d.id} autorizada para ${ref.trim()}.`);
+  loadInstalls();
+});
+
+const revoke = guard(async (d) => {
+  if (!confirm(`Bloquear ${d.id}? O app deixa de enviar dados e mostra "Conexão não autorizada".`)) return;
+  await api("POST", `/v1/devices/${encodeURIComponent(d.id)}/revoke`);
+  flash(`Instalação ${d.id} bloqueada.`);
+  loadInstalls();
+});
+
+let cfgDevice = null;
+function editConfig(d) {
+  cfgDevice = d;
+  $("#cfgFor").textContent = `${d.id}${d.patient_ref ? " · " + d.patient_ref : ""} · versão atual ${d.config_version}`;
+  $("#cfgHr").value = String(d.config.hr_interval_min);
+  $("#cfgHist").value = d.config.history_interval_min;
+  const p = d.config.band_profile || {};
+  $("#pYear").value = p.birth_year ?? ""; $("#pGender").value = p.gender ?? ""; $("#pHeight").value = p.height_cm ?? "";
+  $("#pWeight").value = p.weight_kg ?? ""; $("#pWrist").value = p.wrist ?? "left"; $("#pGoal").value = p.step_goal ?? 8000;
+  $("#cfgMsg").replaceChildren();
+  $("#cfgDialog").showModal();
+}
+$("#cfgSave").addEventListener("click", guard(async (e) => {
+  e.preventDefault();
+  if (!$("#cfgForm").reportValidity()) return;
+  const body = { hr_interval_min: Number($("#cfgHr").value), history_interval_min: Number($("#cfgHist").value) };
+  const fields = [$("#pYear").value, $("#pGender").value, $("#pHeight").value, $("#pWeight").value];
+  if (fields.some(Boolean)) {
+    if (!fields.every(Boolean)) {
+      $("#cfgMsg").replaceChildren(el("div", { class: "notice error", style: "margin-top:12px" }, "Preencha nascimento, sexo, altura e peso — ou deixe todos em branco."));
+      return;
+    }
+    body.band_profile = { birth_year: Number(fields[0]), gender: fields[1], height_cm: Number(fields[2]), weight_kg: Number(fields[3]), wrist: $("#pWrist").value, step_goal: Number($("#pGoal").value) };
+  } else if (cfgDevice.config.band_profile) {
+    body.band_profile = null;
+  }
+  const r = await api("PUT", `/v1/devices/${encodeURIComponent(cfgDevice.id)}/config`, body);
+  $("#cfgDialog").close();
+  flash(`Perfil de coleta salvo (versão ${r.config_version}). O app recebe a mudança ao estar conectado.`);
+  loadInstalls();
+}));
+
+const showConsents = guard(async (d) => {
+  const { data } = await api("GET", `/v1/devices/${encodeURIComponent(d.id)}/consents`);
+  $("#consFor").textContent = d.id;
+  $("#consents").replaceChildren(...(data.length ? data.map((c) => el("tr", {}, el("td", {}, fmt(c.created_at)), el("td", {}, c.version), el("td", {}, c.accepted ? "Aceitou" : "Recusou")))
+    : [el("tr", {}, el("td", { colspan: "3", class: "muted" }, "Sem registros."))]));
+  $("#consDialog").showModal();
+});
+
+// ------------------------------------------------------------------ termo
+const loadTerms = guard(async () => {
+  const cur = await fetch("/v1/consent/terms/current");
+  if (cur.ok) {
+    const t = await cur.json();
+    $("#currentTerm").replaceChildren(el("h2", {}, `Vigente: ${t.title} (versão ${t.version})`), el("p", { class: "muted" }, `Publicado em ${fmt(t.published_at)}${t.requires_reconsent ? " · exigiu novo aceite" : ""}`), el("pre", { class: "term" }, t.content));
+  } else {
+    $("#currentTerm").replaceChildren(el("div", { class: "notice warn" }, "Nenhum termo publicado. Enquanto isso, ninguém consegue aderir pelo app."));
+  }
+  const { data } = await api("GET", "/v1/consent/terms");
+  $("#terms").replaceChildren(...data.map((t) => el("tr", {}, el("td", {}, t.version), el("td", {}, t.title), el("td", {}, t.requires_reconsent ? "Sim" : "Não"), el("td", {}, fmt(t.published_at)))));
+});
+$("#termForm").addEventListener("submit", guard(async (e) => {
+  e.preventDefault();
+  const version = $("#tVersion").value.trim();
+  if (!confirm(`Publicar a versão ${version}? Ela não poderá ser editada depois.${$("#tReconsent").checked ? " Quem aceitou versões anteriores precisará aceitar de novo." : ""}`)) return;
+  await api("POST", "/v1/consent/terms", { version, title: $("#tTitle").value.trim(), content: $("#tContent").value.trim(), requires_reconsent: $("#tReconsent").checked });
+  $("#tVersion").value = ""; $("#tContent").value = "";
+  flash(`Versão ${version} publicada.`);
+  loadTerms();
+}));
+
+// ------------------------------------------------------------------ técnicos
+const loadTechs = guard(async () => {
+  const { data } = await api("GET", "/v1/technicians");
+  $("#techs").replaceChildren(...data.map((t) => {
+    const locked = t.locked_until && t.locked_until > Date.now();
+    return el("tr", {},
+      el("td", {}, t.name),
+      el("td", {}, t.credential),
+      el("td", {}, t.scopes.includes("provision") ? "Testes e autorização" : "Testes"),
+      el("td", {}, t.disabled_at ? el("span", { class: "pill revoked" }, "Desativado") : locked ? el("span", { class: "pill pending" }, "Bloqueado por tentativas") : el("span", { class: "pill active" }, "Ativo")),
+      el("td", {}, t.disabled_at ? "" : el("div", { class: "actions" },
+        locked ? el("button", { class: "btn secondary", onclick: () => techAction(t, { unlock: true }, "Desbloqueado.") }, "Desbloquear") : null,
+        el("button", { class: "btn secondary", onclick: () => resetPassword(t) }, "Nova senha"),
+        el("button", { class: "btn danger", onclick: () => disableTech(t) }, "Desativar"),
+      )),
+    );
+  }));
+});
+$("#techForm").addEventListener("submit", guard(async (e) => {
+  e.preventDefault();
+  await api("POST", "/v1/technicians", { credential: $("#cCred").value.trim(), name: $("#cName").value.trim(), password: $("#cPass").value, scopes: $("#cProv").checked ? ["tech", "provision"] : ["tech"] });
+  flash(`Técnico ${$("#cName").value.trim()} criado.`);
+  $("#techForm").reset();
+  loadTechs();
+}));
+const techAction = guard(async (t, body, msg) => { await api("PATCH", `/v1/technicians/${encodeURIComponent(t.id)}`, body); flash(msg); loadTechs(); });
+function resetPassword(t) {
+  const p = prompt(`Nova senha para ${t.name} (mínimo 10 caracteres). As sessões abertas serão encerradas.`);
+  if (p === null) return;
+  if (p.length < 10) return flash("A senha precisa ter pelo menos 10 caracteres.", "error");
+  techAction(t, { password: p }, "Senha alterada.");
+}
+const disableTech = guard(async (t) => {
+  if (!confirm(`Desativar ${t.name}? As sessões abertas serão encerradas.`)) return;
+  await api("DELETE", `/v1/technicians/${encodeURIComponent(t.id)}`);
+  flash(`${t.name} desativado.`);
+  loadTechs();
+});
+
+// ------------------------------------------------------------------ alertas
+const sevLabel = { info: "Informativo", warning: "Atenção", critical: "Crítico" };
+const loadAlerts = guard(async () => {
+  const { data } = await api("GET", "/v1/alerts?acked=false&order=desc&limit=500");
+  $("#alerts").replaceChildren(...data.map((a) => el("tr", {},
+    el("td", {}, fmt(a.ts)), el("td", {}, a.device_id),
+    el("td", {}, el("span", { class: `pill ${a.severity === "critical" ? "revoked" : a.severity === "warning" ? "pending" : "active"}` }, sevLabel[a.severity] || a.severity)),
+    el("td", {}, a.message),
+    el("td", {}, el("button", { class: "btn secondary", onclick: guard(async () => { await api("POST", `/v1/alerts/${encodeURIComponent(a.id)}/ack`); loadAlerts(); }) }, "Reconhecer")),
+  )));
+  $("#alertsEmpty").textContent = data.length ? "" : "Nenhum alerta pendente.";
+});
+
+start();
+</script>
+</body>
+</html>

@@ -11,6 +11,8 @@ import com.miband3.app.BuildConfig
 import com.miband3.app.ble.BandEvent
 import com.miband3.app.ble.ConnectionState
 import com.miband3.app.ble.MiBandManager
+import com.miband3.app.ble.MiBandProtocol
+import com.miband3.app.ble.UserProfile
 import com.miband3.app.data.InstallationStore
 import com.miband3.app.data.Parsers
 import com.miband3.app.service.MiBandService
@@ -288,6 +290,7 @@ object CloudClient {
         if (before.hrIntervalMin != after.hrIntervalMin && MiBandManager.state.value.connection == ConnectionState.READY) {
             applyHeartRateMode()
         }
+        applyBandProfile()
         if (!after.accepting && queue.size > 0) {
             // Instalação deixou de estar autorizada: nada pendente deve ser enviado depois.
             queue.clear()
@@ -410,6 +413,27 @@ object CloudClient {
                 if (minutes % install.historyIntervalMin.coerceAtLeast(15) == 0) MiBandManager.fetchHistory()
             }
         }
+    }
+
+    /**
+     * Grava na pulseira o perfil físico definido pela equipe. O MiBandManager guarda o perfil
+     * e o reenvia a cada conexão; aqui só atualizamos quando a nuvem muda.
+     */
+    private fun applyBandProfile() {
+        val p = InstallationStore.current.bandProfile ?: return
+        val target = UserProfile(
+            birthYear = p.birthYear,
+            gender = when (p.gender) {
+                "male" -> MiBandProtocol.Gender.MALE
+                "female" -> MiBandProtocol.Gender.FEMALE
+                else -> MiBandProtocol.Gender.OTHER
+            },
+            heightCm = p.heightCm,
+            weightKg = p.weightKg,
+            leftWrist = p.leftWrist,
+            stepGoal = p.stepGoal,
+        )
+        if (MiBandManager.settings.value.profile != target) MiBandManager.saveProfile(target)
     }
 
     private fun applyHeartRateMode() {

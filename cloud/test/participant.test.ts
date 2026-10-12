@@ -51,7 +51,7 @@ describe("termo e adesão", () => {
     const { json } = await enroll();
     expect(json).toMatchObject({ status: "pending", authorized: false, consent: { accepted_version: V1, valid: true } });
     expect(json.device_token).toMatch(/^mbd_/);
-    expect(json.config).toEqual({ hr_interval_min: 30, history_interval_min: 30 });
+    expect(json.config).toEqual({ hr_interval_min: 30, history_interval_min: 30, band_profile: null });
 
     const records = await call("GET", `/v1/devices/${json.device_id}/consents`);
     expect(records.json.data).toHaveLength(1);
@@ -108,6 +108,12 @@ describe("perfil de coleta e bloqueio", () => {
     expect(put.json.config_version).toBe(welcome.config_version + 1);
     const status = await app.waitFor((m) => m.t === "status" && m.config?.hr_interval_min === 10);
     expect(status.config_version).toBe(put.json.config_version);
+
+    // Perfil físico da pulseira: validado e mantido junto com o restante da configuração.
+    expect((await call("PUT", `/v1/devices/${id}/config`, { body: { band_profile: { birth_year: 1980, gender: "x", height_cm: 170, weight_kg: 70 } } })).status).toBe(400);
+    const prof = await call("PUT", `/v1/devices/${id}/config`, { body: { band_profile: { birth_year: 1980, gender: "female", height_cm: 162, weight_kg: 58 } } });
+    expect(prof.json.config).toMatchObject({ hr_interval_min: 10, band_profile: { gender: "female", wrist: "left", step_goal: 8000 } });
+    await app.waitFor((m) => m.t === "status" && m.config?.band_profile?.height_cm === 162);
   });
 
   it("bloquear a instalação derruba o app e impede reconexão", async () => {

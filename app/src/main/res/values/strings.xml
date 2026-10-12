@@ -175,6 +175,9 @@
     <string name="tech_profile_card">Perfil de coleta (definido em nuvem)</string>
     <string name="tech_profile_hr">Frequência cardíaca</string>
     <string name="tech_profile_history">Histórico da pulseira</string>
+    <string name="tech_profile_band">Perfil na pulseira</string>
+    <string name="tech_profile_band_value">%1$d cm · %2$d kg · nasc. %3$d</string>
+    <string name="tech_profile_band_default">Padrão do aplicativo</string>
     <string name="tech_profile_version">Versão</string>
     <string name="tech_profile_updated">Atualizado em</string>
     <string name="tech_profile_synced">Sincronizado em</string>

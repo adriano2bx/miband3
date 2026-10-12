@@ -34,15 +34,28 @@ export function consentState(acceptedVersion: string | null, term: TermRow | nul
 
 // ====================================================================== perfil de coleta
 
+/** Dados físicos usados pela pulseira para calcular calorias e distância (não identificam a pessoa). */
+export const BandProfile = z.object({
+  birth_year: z.number().int().min(1900).max(2030),
+  gender: z.enum(["male", "female", "other"]),
+  height_cm: z.number().int().min(50).max(250),
+  weight_kg: z.number().int().min(20).max(300),
+  wrist: z.enum(["left", "right"]).default("left"),
+  step_goal: z.number().int().min(1000).max(50000).default(8000),
+});
+export type BandProfile = z.infer<typeof BandProfile>;
+
 export const CollectionConfig = z.object({
   /** Minutos entre medições de FC; 0 = contínua. */
   hr_interval_min: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.literal(60), z.literal(120)]),
   /** Minutos entre downloads do histórico por minuto da pulseira. */
   history_interval_min: z.number().int().min(15).max(240),
+  /** null = a pulseira mantém o perfil padrão do app. */
+  band_profile: BandProfile.nullable(),
 });
 export type CollectionConfig = z.infer<typeof CollectionConfig>;
 
-export const DEFAULT_CONFIG: CollectionConfig = { hr_interval_min: 30, history_interval_min: 30 };
+export const DEFAULT_CONFIG: CollectionConfig = { hr_interval_min: 30, history_interval_min: 30, band_profile: null };
 
 export function effectiveConfig(json: string | null | undefined): CollectionConfig {
   const parsed = CollectionConfig.partial().safeParse(parseJson(json, {}));

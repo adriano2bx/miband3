@@ -74,7 +74,7 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/devices/{id}/consents": { get: { summary: "Histórico de aceites e recusas.", scope: "read", tag: "Participantes" } },
   "/v1/devices/{id}/authorize": { post: { summary: "Autoriza a instalação e vincula o participante (participant_ref).", scope: "manage", tag: "Participantes" } },
   "/v1/devices/{id}/revoke": { post: { summary: "Bloqueia a instalação (app mostra 'Conexão não autorizada').", scope: "manage", tag: "Participantes" } },
-  "/v1/devices/{id}/config": { put: { summary: "Perfil de coleta: hr_interval_min (0=contínua, 5, 10, 15, 30, 60, 120) e history_interval_min (15–240). Enviado ao app em tempo real.", scope: "manage", tag: "Participantes" } },
+  "/v1/devices/{id}/config": { put: { summary: "Perfil de coleta: hr_interval_min (0=contínua, 5, 10, 15, 30, 60, 120) e history_interval_min (15–240) e band_profile {birth_year, gender, height_cm, weight_kg, wrist, step_goal} aplicado na pulseira. Enviado ao app em tempo real.", scope: "manage", tag: "Participantes" } },
   "/v1/technicians": {
     get: { summary: "Lista técnicos.", scope: "admin", tag: "Acesso técnico" },
     post: { summary: "Cria técnico (credencial, nome, senha ≥ 10 caracteres, escopos tech/provision).", scope: "admin", tag: "Acesso técnico" },

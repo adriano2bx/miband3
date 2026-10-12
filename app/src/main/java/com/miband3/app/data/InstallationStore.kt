@@ -28,6 +28,8 @@ data class Installation(
     val historyIntervalMin: Int = 30,
     val configVersion: Int = 0,
     val configUpdatedAt: Long? = null,
+    /** Perfil físico definido pela equipe na nuvem (null = padrão do app). */
+    val bandProfile: BandProfileInfo? = null,
 ) {
     val enrolled: Boolean get() = deviceToken != null
     val hasValidConsent: Boolean get() = enrolled && consentVersion != null && !reconsentRequired && !declined
@@ -57,6 +59,7 @@ object InstallationStore {
             historyIntervalMin = prefs.getInt("historyIntervalMin", 30),
             configVersion = prefs.getInt("configVersion", 0),
             configUpdatedAt = prefs.getLong("configUpdatedAt", 0L).takeIf { it > 0 },
+            bandProfile = prefs.getString("bandProfile", null)?.let(::decodeProfile),
         )
     }
 
@@ -77,7 +80,18 @@ object InstallationStore {
             .putInt("historyIntervalMin", next.historyIntervalMin)
             .putInt("configVersion", next.configVersion)
             .putLong("configUpdatedAt", next.configUpdatedAt ?: 0L)
+            .putString("bandProfile", next.bandProfile?.let(::encodeProfile))
             .apply()
+    }
+
+    private fun encodeProfile(p: BandProfileInfo) =
+        listOf(p.birthYear, p.gender, p.heightCm, p.weightKg, p.leftWrist, p.stepGoal).joinToString(";")
+
+    private fun decodeProfile(text: String): BandProfileInfo? = try {
+        val f = text.split(";")
+        BandProfileInfo(f[0].toInt(), f[1], f[2].toInt(), f[3].toInt(), f[4].toBoolean(), f[5].toInt())
+    } catch (e: Exception) {
+        null
     }
 
     /** Aplica o estado da instalação informado pela nuvem (welcome/status ou GET /v1/installation). */
@@ -92,6 +106,7 @@ object InstallationStore {
             historyIntervalMin = info.config?.historyIntervalMin ?: it.historyIntervalMin,
             configVersion = info.configVersion ?: it.configVersion,
             configUpdatedAt = info.configUpdatedAt ?: it.configUpdatedAt,
+            bandProfile = if (info.config != null) info.config.bandProfile else it.bandProfile,
         )
     }
 }

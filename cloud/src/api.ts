@@ -9,6 +9,7 @@ import { newId, parseJson, parseTime, randomToken, sha256Hex } from "./util";
 import { deliverOne, WEBHOOK_EVENTS } from "./webhooks";
 import { openapi } from "./openapi";
 import { participantApi } from "./participant-api";
+import { effectiveConfig } from "./participants";
 
 export const api = new Hono<AppEnv>();
 
@@ -87,6 +88,12 @@ interface DeviceRow {
   band_info: string | null;
   client_info: string | null;
   archived_at: number | null;
+  status: string;
+  consent_version: string | null;
+  consent_at: number | null;
+  config: string;
+  config_version: number;
+  config_updated_at: number | null;
 }
 
 const serializeDevice = (d: DeviceRow) => ({
@@ -102,6 +109,12 @@ const serializeDevice = (d: DeviceRow) => ({
   band: parseJson(d.band_info, null),
   client: parseJson(d.client_info, null),
   archived_at: d.archived_at,
+  status: d.status,
+  consent_version: d.consent_version,
+  consent_at: d.consent_at,
+  config: effectiveConfig(d.config),
+  config_version: d.config_version,
+  config_updated_at: d.config_updated_at,
 });
 
 /** Middleware: autentica, confere o escopo e o acesso da chave à pulseira e garante que ela existe. */
@@ -198,6 +211,7 @@ api.get("/v1/devices", requireAuth("read"), async (c) => {
   if (q.archived !== "true") where.push("archived_at IS NULL");
   if (q.online) { where.push("online = ?"); args.push(q.online === "true" ? 1 : 0); }
   if (q.patient_ref) { where.push("patient_ref = ?"); args.push(q.patient_ref); }
+  if (q.status) { where.push("status = ?"); args.push(q.status); }
   if (q.q) { where.push("(name LIKE ? OR patient_ref LIKE ?)"); args.push(`%${q.q}%`, `%${q.q}%`); }
   const p = c.get("principal");
   if (p.deviceIds) {
