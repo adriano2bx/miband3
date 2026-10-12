@@ -109,6 +109,7 @@ class TechLoginViewModel : ViewModel() {
 @Composable
 fun TechLoginScreen(onBack: () -> Unit, onAuthorized: () -> Unit, vm: TechLoginViewModel = viewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.clearError() }
     var credential by rememberSaveable { mutableStateOf("") }
     // A senha não é salva no estado restaurável (nem em logs).
     var password by androidx.compose.runtime.remember { mutableStateOf("") }

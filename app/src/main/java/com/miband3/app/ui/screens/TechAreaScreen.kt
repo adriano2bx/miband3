@@ -79,7 +79,11 @@ import java.util.Date
 import java.util.Locale
 
 @Composable
-fun TechAreaScreen(onEnd: () -> Unit, vm: TechViewModel = viewModel()) {
+fun TechAreaScreen(
+    onEnd: () -> Unit,
+    // Um ViewModel por sessão: registro e resultados de testes não passam de uma sessão para outra.
+    vm: TechViewModel = viewModel(key = "tech-" + (TechSession.session.value?.token?.takeLast(12) ?: "none")),
+) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(1) }
 
