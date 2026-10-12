@@ -24,13 +24,17 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.miband3.app.BuildConfig
 import com.miband3.app.ble.MiBandProtocol.AlertCategory
 import com.miband3.app.ble.MiBandProtocol.AuthResponse
 import com.miband3.app.ble.MiBandProtocol.DeviceEvent
 import com.miband3.app.ble.MiBandProtocol.toHex
 import com.miband3.app.service.MiBandService
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.security.SecureRandom
@@ -64,11 +68,19 @@ data class BandState(
     val findingPhone: Boolean = false,
     /** Motivo da última falha de conexão, com dica de como resolver. */
     val lastError: String? = null,
+    /** A pulseira recusou a autenticação (ou não é uma pulseira compatível). */
+    val authRejected: Boolean = false,
+    /** O app continua tentando (re)conectar sozinho. */
+    val retrying: Boolean = false,
 )
 
 data class ScannedDevice(val address: String, val name: String?, val rssi: Int) {
     val looksLikeMiBand: Boolean
         get() = name?.contains("band", ignoreCase = true) == true
+
+    /** Pulseiras reconhecidas aparecem sempre como [Branding.PRODUCT_NAME]; outros aparelhos mantêm o nome. */
+    val displayName: String
+        get() = if (looksLikeMiBand) Branding.PRODUCT_NAME else name ?: "(sem nome)"
 }
 
 data class LogEntry(val time: Long, val text: String, val fromBand: Boolean)
@@ -116,6 +128,7 @@ object MiBandManager {
     private const val MAX_FAILED_ATTEMPTS = 4
     private const val STABLE_CONNECTION_MS = 60_000L
     private const val HR_PING_INTERVAL_MS = 12_000L
+    private const val FETCH_TIMEOUT_MS = 20_000L
     private const val MAX_LOG = 200
     const val ALARM_SLOTS = 3
 
@@ -133,6 +146,9 @@ object MiBandManager {
     private val _scanning = MutableStateFlow(false)
     val scanning: StateFlow<Boolean> = _scanning.asStateFlow()
 
+    private val _events = MutableSharedFlow<BandEvent>(extraBufferCapacity = 512)
+    val events: SharedFlow<BandEvent> = _events.asSharedFlow()
+
     private val _log = MutableStateFlow<List<LogEntry>>(emptyList())
     val log: StateFlow<List<LogEntry>> = _log.asStateFlow()
 
@@ -144,6 +160,24 @@ object MiBandManager {
 
     private var gatt: BluetoothGatt? = null
     private var userWantsConnection = false
+
+    private fun setWantsConnection(value: Boolean) {
+        userWantsConnection = value
+        _state.update { it.copy(retrying = value) }
+    }
+
+    /**
+     * Modo monitoramento (instalação concluída): nunca desiste de reconectar. As tentativas
+     * passam a ser espaçadas, mas continuam enquanto a pulseira estiver salva.
+     */
+    @Volatile
+    var keepTrying = false
+
+    private val _bluetoothOn = MutableStateFlow(false)
+    val bluetoothOn: StateFlow<Boolean> = _bluetoothOn.asStateFlow()
+
+    /** Status da última escrita GATT concluída (usado pelos testes técnicos). */
+    private var lastWriteOk = true
     private var triedSendingKey = false
 
     /** Tentativas seguidas que caíram antes de a pulseira ficar pronta. */
@@ -181,7 +215,26 @@ object MiBandManager {
         )
         _alarms.value = (0 until ALARM_SLOTS).map { loadAlarm(it) }
         registerBondReceiver()
-        _state.update { it.copy(address = savedAddress, name = prefs.getString(KEY_NAME, null)) }
+        registerBluetoothStateReceiver()
+        _state.update { it.copy(address = savedAddress, name = savedAddress?.let { Branding.PRODUCT_NAME }) }
+    }
+
+    private fun registerBluetoothStateReceiver() {
+        _bluetoothOn.value = try { bluetoothAdapter?.isEnabled == true } catch (e: SecurityException) { false }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
+                    BluetoothAdapter.STATE_ON -> {
+                        _bluetoothOn.value = true
+                        if (keepTrying) handler.postDelayed({ reconnectIfSaved() }, 1_500)
+                    }
+                    BluetoothAdapter.STATE_OFF, BluetoothAdapter.STATE_TURNING_OFF -> _bluetoothOn.value = false
+                }
+            }
+        }
+        ContextCompat.registerReceiver(
+            appContext, receiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED,
+        )
     }
 
     /** Registra no histórico quando o Android tenta parear (bond) com a pulseira — útil para diagnóstico. */
@@ -257,17 +310,30 @@ object MiBandManager {
     fun connect(address: String, name: String? = null) {
         stopScan()
         if (address != savedAddress) {
-            prefs.edit().putString(KEY_ADDRESS, address).putString(KEY_NAME, name).apply()
+            prefs.edit().putString(KEY_ADDRESS, address).putString(KEY_NAME, Branding.PRODUCT_NAME).apply()
         }
-        userWantsConnection = true
+        setWantsConnection(true)
         failedAttempts = 0
-        _state.update { it.copy(lastError = null) }
+        _state.update { it.copy(lastError = null, authRejected = false) }
         MiBandService.start(appContext)
         handler.post { connectInternal(address) }
     }
 
     fun connectSaved() {
         savedAddress?.let { connect(it, prefs.getString(KEY_NAME, null)) }
+    }
+
+    /**
+     * Reconecta à pulseira salva sem interação do usuário (ex.: o processo foi recriado com o
+     * envio à nuvem ligado). Não faz nada se faltar permissão ou o Bluetooth estiver desligado.
+     */
+    fun reconnectIfSaved() {
+        if (savedAddress == null || _state.value.connection != ConnectionState.DISCONNECTED) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        if (!isBluetoothEnabled) return
+        connectSaved()
     }
 
     private fun connectInternal(address: String) {
@@ -285,7 +351,7 @@ object MiBandManager {
             it.copy(
                 connection = ConnectionState.CONNECTING,
                 address = address,
-                name = prefs.getString(KEY_NAME, null) ?: device.name,
+                name = Branding.PRODUCT_NAME,
             )
         }
         val attempt = if (failedAttempts > 0) " (tentativa ${failedAttempts + 1} de $MAX_FAILED_ATTEMPTS)" else ""
@@ -337,7 +403,7 @@ object MiBandManager {
         val tips = buildList {
             if (bonded) {
                 add("Este celular tem um pareamento Bluetooth antigo com a pulseira: abra as configurações de Bluetooth, " +
-                    "toque na engrenagem da Mi Band 3 e escolha \"Desparear\" / \"Esquecer\".")
+                    "toque na engrenagem da Biosense Pulse e escolha \"Desparear\" / \"Esquecer\".")
             }
             add("Feche (forçar parada) o Zepp Life / Mi Fit e desligue o Bluetooth de outros celulares que já usaram a pulseira.")
             add("Se nada resolver, reinicie a pulseira de fábrica (Mais > Configurações > Restaurar) e pareie de novo.")
@@ -346,7 +412,7 @@ object MiBandManager {
     }
 
     fun disconnect() {
-        userWantsConnection = false
+        setWantsConnection(false)
         handler.post {
             handler.removeCallbacks(reconnectRunnable)
             stopHeartRatePing()
@@ -413,6 +479,7 @@ object MiBandManager {
                         handler.removeCallbacks(discoveryTimeout)
                         val wasReady = _state.value.connection == ConnectionState.READY
                         stopHeartRatePing()
+                        if (fetchStep != FetchStep.IDLE) finishFetch(success = false)
                         closeGatt()
                         _state.update {
                             it.copy(
@@ -431,15 +498,21 @@ object MiBandManager {
                         } else {
                             failedAttempts++
                         }
-                        if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+                        if (failedAttempts >= MAX_FAILED_ATTEMPTS && !keepTrying) {
                             val explanation = explainStatus(status, isBondedInAndroid())
                             log("Não foi possível conectar após $MAX_FAILED_ATTEMPTS tentativas. $explanation", fromBand = false)
-                            userWantsConnection = false
+                            setWantsConnection(false)
                             _state.update { it.copy(lastError = explanation) }
                             MiBandService.stop(appContext)
                         } else {
-                            log("Tentando reconectar em ${RECONNECT_DELAY_MS / 1000}s…", fromBand = false)
-                            handler.postDelayed(reconnectRunnable, RECONNECT_DELAY_MS)
+                            // No monitoramento, as tentativas continuam, cada vez mais espaçadas.
+                            val delay = when {
+                                failedAttempts < MAX_FAILED_ATTEMPTS -> RECONNECT_DELAY_MS
+                                failedAttempts < MAX_FAILED_ATTEMPTS * 3 -> 30_000L
+                                else -> 60_000L
+                            }
+                            log("Tentando reconectar em ${delay / 1000}s…", fromBand = false)
+                            handler.postDelayed(reconnectRunnable, delay)
                         }
                     }
                 }
@@ -483,6 +556,7 @@ object MiBandManager {
 
         override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
             handler.post {
+                lastWriteOk = status == BluetoothGatt.GATT_SUCCESS
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     log("Falha na escrita em ${ch.uuid} ($status)", fromBand = false)
                 }
@@ -537,14 +611,14 @@ object MiBandManager {
         _state.update { it.copy(connection = ConnectionState.AUTHENTICATING) }
         if (gattQueue.findCharacteristic(MiBandUuids.CHAR_AUTH) == null) {
             val services = describeServices()
-            log("Sem característica de autenticação da Mi Band. Serviços encontrados:\n$services", fromBand = false)
+            log("Sem característica de autenticação da Biosense Pulse. Serviços encontrados:\n$services", fromBand = false)
             val message = "O dispositivo conectado não tem o serviço de autenticação da Xiaomi/Huami, " +
-                "então não é uma Mi Band 3 original. Pode ser outro aparelho da lista ou uma réplica " +
+                "então não é uma pulseira original compatível. Pode ser outro aparelho da lista ou uma réplica " +
                 "(\"M3\", \"Smart Band\" — usadas com apps como FitPro, Lefun ou Yoho), que usam outro protocolo.\n\n" +
                 "Serviços encontrados:\n$services"
             // Não adianta tentar de novo: o aparelho simplesmente não fala esse protocolo.
-            userWantsConnection = false
-            _state.update { it.copy(lastError = message) }
+            setWantsConnection(false)
+            _state.update { it.copy(lastError = message, authRejected = true) }
             gatt?.disconnect()
             MiBandService.stop(appContext)
             return
@@ -587,7 +661,8 @@ object MiBandManager {
             AuthResponse.KeyRejected -> {
                 _state.update { it.copy(awaitingTap = false) }
                 log("A pulseira recusou a chave. Reinicie a pulseira ou desvincule-a do Mi Fit.", fromBand = true)
-                userWantsConnection = false
+                _state.update { it.copy(authRejected = true) }
+                setWantsConnection(false)
                 gatt?.disconnect()
             }
             is AuthResponse.RandomReceived -> {
@@ -602,12 +677,13 @@ object MiBandManager {
                     sendAuthKey()
                 } else {
                     log("Falha na autenticação", fromBand = true)
-                    userWantsConnection = false
+                    _state.update { it.copy(authRejected = true) }
+                    setWantsConnection(false)
                     gatt?.disconnect()
                 }
             }
             AuthResponse.Authenticated -> onAuthenticated()
-            null -> Log.d(TAG, "Resposta de autenticação desconhecida: ${data.toHex()}")
+            null -> debugLog("Resposta de autenticação desconhecida: ${data.toHex()}")
         }
     }
 
@@ -622,6 +698,8 @@ object MiBandManager {
             MiBandUuids.CHAR_STEPS,
             MiBandUuids.CHAR_BATTERY,
             MiBandUuids.CHAR_HR_MEASUREMENT,
+            MiBandUuids.CHAR_ACTIVITY_CONTROL,
+            MiBandUuids.CHAR_ACTIVITY_DATA,
         ).forEach { q.enqueue(GattQueue.Op.Notify(it)) }
         syncTime()
         applySettings()
@@ -641,12 +719,21 @@ object MiBandManager {
             MiBandUuids.CHAR_AUTH -> handleAuth(data)
             MiBandUuids.CHAR_BATTERY -> MiBandProtocol.parseBattery(data)?.let { b ->
                 _state.update { it.copy(battery = b.level, charging = b.charging) }
+                val event = BandEvent.Battery(System.currentTimeMillis(), b.level, b.charging)
+                batteryListeners.toList().forEach { it(event) }
+                _events.tryEmit(event)
             }
             MiBandUuids.CHAR_STEPS -> MiBandProtocol.parseSteps(data)?.let { a ->
                 _state.update { it.copy(steps = a.steps, meters = a.meters ?: it.meters, calories = a.calories ?: it.calories) }
+                _events.tryEmit(BandEvent.Steps(System.currentTimeMillis(), a.steps, a.meters, a.calories))
             }
+            MiBandUuids.CHAR_ACTIVITY_CONTROL -> handleFetchControl(data)
+            MiBandUuids.CHAR_ACTIVITY_DATA -> handleFetchData(data)
             MiBandUuids.CHAR_HR_MEASUREMENT -> MiBandProtocol.parseHeartRate(data)?.let { bpm ->
-                if (bpm > 0) log("Frequência cardíaca: $bpm bpm", fromBand = true)
+                if (bpm > 0) {
+                    log("Frequência cardíaca: $bpm bpm", fromBand = true)
+                    _events.tryEmit(BandEvent.HeartRate(System.currentTimeMillis(), bpm))
+                }
                 _state.update {
                     it.copy(heartRate = if (bpm > 0) bpm else it.heartRate, measuringHeartRate = it.continuousHeartRate)
                 }
@@ -655,8 +742,8 @@ object MiBandManager {
             MiBandUuids.CHAR_FIRMWARE -> _state.update { it.copy(firmware = data.decodeToString().trim('\u0000')) }
             MiBandUuids.CHAR_HARDWARE -> _state.update { it.copy(hardware = data.decodeToString().trim('\u0000')) }
             MiBandUuids.CHAR_SERIAL -> _state.update { it.copy(serial = data.decodeToString().trim('\u0000')) }
-            MiBandUuids.CHAR_CONFIG -> Log.d(TAG, "Resposta de configuração: ${data.toHex()}")
-            else -> Log.d(TAG, "Dados de $uuid: ${data.toHex()}")
+            MiBandUuids.CHAR_CONFIG -> debugLog("Resposta de configuração: ${data.toHex()}")
+            else -> debugLog("Dados de $uuid: ${data.toHex()}")
         }
     }
 
@@ -664,6 +751,7 @@ object MiBandManager {
         val event = DeviceEvent.fromData(data)
         if (event == null) {
             log("Evento desconhecido: ${data.toHex()}", fromBand = true)
+            _events.tryEmit(BandEvent.Device(System.currentTimeMillis(), "UNKNOWN_${data.toHex()}", "Evento desconhecido"))
             return
         }
         when (event) {
@@ -672,6 +760,7 @@ object MiBandManager {
             DeviceEvent.TICK_30MIN -> return // muito frequente para o histórico
             else -> Unit
         }
+        _events.tryEmit(BandEvent.Device(System.currentTimeMillis(), event.name, event.description))
         log(event.description, fromBand = true)
     }
 
@@ -738,7 +827,7 @@ object MiBandManager {
         log("Chamada encerrada", fromBand = false)
     }
 
-    /** Usado pelo [com.miband3.app.service.NotificationForwarder]. */
+    /** Mostra na pulseira uma notificação de app (disponível para comandos futuros). */
     fun forwardNotification(appName: String, icon: Int, title: String, body: String, isCall: Boolean) {
         if (!isReady) return
         val payload = if (isCall) {
@@ -796,6 +885,150 @@ object MiBandManager {
     private fun stopHeartRatePing() {
         handler.removeCallbacks(hrPingRunnable)
     }
+
+    /**
+     * Vibra [count] vezes: cada pulso dura [durationMs] e há [pauseMs] entre eles.
+     * A pulseira vibra enquanto o nível de alerta está ligado, então desligamos ao fim de cada pulso.
+     */
+    fun vibratePattern(count: Int, durationMs: Long, pauseMs: Long, high: Boolean = true) {
+        if (!requireReady()) return
+        val level = if (high) MiBandProtocol.AlertLevel.HIGH else MiBandProtocol.AlertLevel.MILD
+        for (i in 0 until count.coerceIn(1, 10)) {
+            val start = i * (durationMs + pauseMs)
+            handler.postDelayed({
+                write(MiBandUuids.CHAR_ALERT_LEVEL, byteArrayOf(level), noResponse = true)
+            }, start)
+            handler.postDelayed({
+                write(MiBandUuids.CHAR_ALERT_LEVEL, byteArrayOf(MiBandProtocol.AlertLevel.NONE), noResponse = true)
+            }, start + durationMs)
+        }
+        log("Vibrar ${count}x", fromBand = false)
+    }
+
+    // =================================================================== histórico (sono / atividade por minuto)
+
+    private enum class FetchStep { IDLE, WAITING_START, WAITING_DATA }
+
+    private var fetchStep = FetchStep.IDLE
+    private var fetchStartMs = 0L
+    private var fetchNextSampleMs = 0L
+    private val fetchSamples = ArrayList<MiBandProtocol.ActivitySample>()
+    private val fetchTimeout = Runnable {
+        if (fetchStep != FetchStep.IDLE) {
+            log("Tempo esgotado ao baixar o histórico da pulseira", fromBand = false)
+            finishFetch(success = false)
+        }
+    }
+
+    /** Callback do último download: (ok, mensagem). Usado para confirmar comandos da nuvem. */
+    private var fetchCallback: ((Boolean, String) -> Unit)? = null
+
+    val lastActivitySyncMs: Long
+        get() = prefs.getLong("lastActivitySync", 0L)
+
+    /**
+     * Baixa da pulseira as amostras por minuto desde [sinceMs] (padrão: a última sincronização,
+     * limitada a 24 h). O resultado sai em [events] como [BandEvent.Activity].
+     */
+    fun fetchHistory(sinceMs: Long? = null, onDone: ((Boolean, String) -> Unit)? = null) {
+        if (!isReady) {
+            onDone?.invoke(false, "pulseira desconectada")
+            return
+        }
+        if (fetchStep != FetchStep.IDLE) {
+            onDone?.invoke(false, "download do histórico já em andamento")
+            return
+        }
+        val now = System.currentTimeMillis()
+        val since = (sinceMs ?: lastActivitySyncMs).coerceAtLeast(now - 24 * 3600_000L).coerceAtMost(now)
+        fetchStep = FetchStep.WAITING_START
+        fetchCallback = onDone
+        fetchSamples.clear()
+        log("Baixando histórico da pulseira…", fromBand = false)
+        write(MiBandUuids.CHAR_ACTIVITY_CONTROL, MiBandProtocol.activityFetchStart(since))
+        handler.removeCallbacks(fetchTimeout)
+        handler.postDelayed(fetchTimeout, FETCH_TIMEOUT_MS)
+    }
+
+    private fun handleFetchControl(data: ByteArray) {
+        if (fetchStep == FetchStep.IDLE) return
+        when (val r = MiBandProtocol.parseFetchResponse(data)) {
+            is MiBandProtocol.FetchResponse.Ready -> {
+                if (fetchStep != FetchStep.WAITING_START) return
+                fetchStartMs = r.startMs
+                fetchNextSampleMs = r.startMs
+                fetchStep = FetchStep.WAITING_DATA
+                write(MiBandUuids.CHAR_ACTIVITY_CONTROL, MiBandProtocol.activityFetchBegin())
+            }
+            MiBandProtocol.FetchResponse.NoData -> {
+                log("Pulseira sem histórico novo", fromBand = true)
+                finishFetch(success = true)
+            }
+            MiBandProtocol.FetchResponse.Finished -> {
+                write(MiBandUuids.CHAR_ACTIVITY_CONTROL, MiBandProtocol.activityFetchAck(keepOnDevice = true))
+                finishFetch(success = true)
+            }
+            MiBandProtocol.FetchResponse.Failed -> {
+                log("A pulseira recusou o download do histórico (${data.toHex()})", fromBand = true)
+                finishFetch(success = false)
+            }
+            null -> debugLog("Resposta de histórico desconhecida: ${data.toHex()}")
+        }
+    }
+
+    private fun handleFetchData(data: ByteArray) {
+        if (fetchStep != FetchStep.WAITING_DATA) return
+        val samples = MiBandProtocol.parseActivityPacket(data, fetchNextSampleMs)
+        fetchNextSampleMs += samples.size * 60_000L
+        fetchSamples += samples
+        // Cada pacote reinicia o prazo: o download de um dia inteiro leva alguns segundos.
+        handler.removeCallbacks(fetchTimeout)
+        handler.postDelayed(fetchTimeout, FETCH_TIMEOUT_MS)
+    }
+
+    private fun finishFetch(success: Boolean) {
+        handler.removeCallbacks(fetchTimeout)
+        val callback = fetchCallback
+        fetchCallback = null
+        fetchStep = FetchStep.IDLE
+        // Amostras 0xff = minuto sem registro (pulseira desligada/carregando).
+        val valid = fetchSamples.filter { it.kind != 0xff }
+        fetchSamples.clear()
+        if (success && valid.isNotEmpty()) {
+            prefs.edit().putLong("lastActivitySync", valid.last().ts + 60_000L).apply()
+            _events.tryEmit(BandEvent.Activity(System.currentTimeMillis(), valid))
+            log("Histórico baixado: ${valid.size} minutos", fromBand = true)
+        }
+        callback?.invoke(success, if (success) "${valid.size} amostras" else "falha ao baixar o histórico")
+    }
+
+    // =================================================================== testes técnicos
+
+    /**
+     * Executa [block] depois que todas as operações GATT já enfileiradas terminarem.
+     * Recebe se a última escrita foi aceita pelo Android (não prova efeito físico na pulseira).
+     */
+    fun afterPendingOperations(block: (lastWriteOk: Boolean) -> Unit) {
+        handler.post { gattQueue.enqueue(GattQueue.Op.Action { block(lastWriteOk) }) }
+    }
+
+    /** Lê a bateria (prova de comunicação BLE real) e devolve o nível lido, ou null. */
+    fun readBatteryNow(onDone: (Int?) -> Unit) {
+        if (!isReady) return onDone(null)
+        val before = System.currentTimeMillis()
+        var result: Int? = null
+        val collector = object : (BandEvent) -> Unit {
+            override fun invoke(e: BandEvent) { if (e is BandEvent.Battery && e.ts >= before) result = e.level }
+        }
+        batteryListeners += collector
+        read(MiBandUuids.CHAR_BATTERY)
+        afterPendingOperations {
+            batteryListeners -= collector
+            onDone(result)
+        }
+    }
+
+    private val batteryListeners = mutableListOf<(BandEvent) -> Unit>()
 
     fun syncTime() {
         if (!isReady) return
@@ -887,14 +1120,19 @@ object MiBandManager {
 
     // =================================================================== histórico
 
+    private fun debugLog(text: String) {
+        if (BuildConfig.DEBUG) Log.d(TAG, text)
+    }
+
     fun log(text: String, fromBand: Boolean) {
-        Log.i(TAG, text)
+        // Nada de dados do participante no logcat em versões de produção.
+        if (BuildConfig.DEBUG) Log.i(TAG, text)
         _log.update { (it + LogEntry(System.currentTimeMillis(), text, fromBand)).takeLast(MAX_LOG) }
     }
 
     fun logAsText(): String {
         val fmt = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-        val header = "Mi Band 3 app ${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} " +
+        val header = "Biosense Pulse app ${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} " +
             "(pareado no Android: ${isBondedInAndroid()})"
         return header + "\n" + _log.value.joinToString("\n") {
             "${fmt.format(java.util.Date(it.time))} ${if (it.fromBand) "[pulseira]" else "[celular]"} ${it.text}"

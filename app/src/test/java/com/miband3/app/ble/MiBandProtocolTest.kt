@@ -144,4 +144,40 @@ class MiBandProtocolTest {
         assertArrayEquals(byteArrayOf(4, 3, 2, 1), p.copyOfRange(12, 16))
         assertArrayEquals(byteArrayOf(0x10, 0, 0, 0x40, 0x1f, 0, 0), MiBandProtocol.stepGoal(8000))
     }
+
+    @Test
+    fun buildsActivityFetchStart() {
+        val tz = TimeZone.getTimeZone("America/Sao_Paulo")
+        val cal = Calendar.getInstance(tz).apply { clear(); set(2026, Calendar.MARCH, 5, 22, 30, 0) }
+        val p = MiBandProtocol.activityFetchStart(cal.timeInMillis, tz)
+        assertArrayEquals(byteArrayOf(0x01, 0x01, 0xea.toByte(), 0x07, 3, 5, 22, 30, -12), p)
+        assertArrayEquals(byteArrayOf(0x02), MiBandProtocol.activityFetchBegin())
+        assertArrayEquals(byteArrayOf(0x03, 0x09), MiBandProtocol.activityFetchAck())
+        assertArrayEquals(byteArrayOf(0x03, 0x01), MiBandProtocol.activityFetchAck(keepOnDevice = false))
+    }
+
+    @Test
+    fun parsesActivityFetchResponses() {
+        val tz = TimeZone.getTimeZone("UTC")
+        val ready = byteArrayOf(0x10, 0x01, 0x01, 0x40, 0x00, 0x00, 0x00, 0xea.toByte(), 0x07, 3, 5, 22, 30, 0)
+        val r = MiBandProtocol.parseFetchResponse(ready, tz) as MiBandProtocol.FetchResponse.Ready
+        assertEquals(64L, r.expectedBytes)
+        val expected = Calendar.getInstance(tz).apply { clear(); set(2026, Calendar.MARCH, 5, 22, 30, 0) }.timeInMillis
+        assertEquals(expected, r.startMs)
+
+        assertEquals(MiBandProtocol.FetchResponse.NoData, MiBandProtocol.parseFetchResponse(byteArrayOf(0x10, 0x01, 0x02), tz))
+        assertEquals(MiBandProtocol.FetchResponse.Finished, MiBandProtocol.parseFetchResponse(byteArrayOf(0x10, 0x02, 0x01), tz))
+        assertNull(MiBandProtocol.parseFetchResponse(byteArrayOf(0x42, 0x01, 0x01), tz))
+    }
+
+    @Test
+    fun parsesActivityPacket() {
+        // contador 7, duas amostras: (kind 1, intensidade 20, 5 passos, FC 70) e (kind 9, 0, 0, FC 255 = sem leitura)
+        val packet = byteArrayOf(7, 1, 20, 5, 70, 9, 0, 0, 0xff.toByte())
+        val samples = MiBandProtocol.parseActivityPacket(packet, 1_000_000L)
+        assertEquals(2, samples.size)
+        assertEquals(MiBandProtocol.ActivitySample(1_000_000L, 1, 20, 5, 70), samples[0])
+        assertEquals(MiBandProtocol.ActivitySample(1_060_000L, 9, 0, 0, null), samples[1])
+        assertTrue(MiBandProtocol.parseActivityPacket(byteArrayOf(1, 2), 0).isEmpty())
+    }
 }

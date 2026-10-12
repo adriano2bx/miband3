@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Símbolo BIOSENSE (pacote de marca v1), centralizado na área segura. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.2" android:scaleY="0.2" android:translateX="34" android:translateY="30">
+        <path android:fillColor="#126C64" android:pathData="M 20 12 L 100 12 C 160 12 184 66 152 120 C 118 78 50 66 20 12 Z" />
+        <path android:fillColor="#126C64" android:pathData="M 152 120 C 194 170 176 228 110 228 L 20 228 C 54 170 114 163 152 120 Z" />
+        <path android:fillColor="#126C64" android:pathData="M36,120 A29,29 0,1 0,94,120 A29,29 0,1 0,36,120 Z" />
+    </group>
+</vector>

@@ -1,5 +1,15 @@
 <resources>
-    <style name="Theme.MiBand3" parent="android:Theme.Material.NoActionBar">
+    <!-- Abertura nativa (Android 12+ e compatibilidade via core-splashscreen). -->
+    <style name="Theme.Biosense.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/biosense_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.Biosense</item>
+    </style>
+
+    <style name="Theme.Biosense" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/biosense_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

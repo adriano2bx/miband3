@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    // Capturas das telas Compose na JVM (verificação visual em 360/412 dp e fonte ampliada).
+    id("app.cash.paparazzi")
 }
 
 android {
@@ -12,8 +14,15 @@ android {
         applicationId = "com.miband3.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
+
+        // Endereço do serviço BIOSENSE na nuvem (não é segredo). Padrão: o domínio oficial;
+        // para testes use -Pbiosense.cloudUrl=... ou a variável de ambiente BIOSENSE_CLOUD_URL.
+        val cloudUrl = (project.findProperty("biosense.cloudUrl") as String?)?.takeIf { it.isNotBlank() }
+            ?: System.getenv("BIOSENSE_CLOUD_URL")?.takeIf { it.isNotBlank() }
+            ?: "https://biosense.deltabots.com.br"
+        buildConfigField("String", "CLOUD_URL", "\"${cloudUrl.replace("\"", "")}\"")
     }
 
     buildTypes {
@@ -33,23 +42,6 @@ android {
         compose = true
         buildConfig = true
     }
-
-    // "padrao" não declara o leitor de notificações, que faz o Play Protect
-    // bloquear a instalação de APKs baixados fora da loja em alguns países.
-    // "completo" inclui o encaminhamento de notificações para a pulseira.
-    flavorDimensions += "edicao"
-    productFlavors {
-        create("padrao") {
-            dimension = "edicao"
-            buildConfigField("boolean", "NOTIFICATION_FORWARDING", "false")
-        }
-        create("completo") {
-            dimension = "edicao"
-            applicationIdSuffix = ".completo"
-            versionNameSuffix = "-completo"
-            buildConfigField("boolean", "NOTIFICATION_FORWARDING", "true")
-        }
-    }
 }
 
 dependencies {
@@ -62,9 +54,14 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    // org.json do Android é só um stub nos testes de JVM.
+    testImplementation("org.json:json:20240303")
 }

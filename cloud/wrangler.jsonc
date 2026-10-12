@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "biosense-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // Endereço público do painel, da API e do app. O deploy cria o DNS e o certificado
+  // (a zona deltabots.com.br precisa estar nesta conta Cloudflare). O workers.dev continua
+  // ativo como alternativa.
+  "routes": [{ "pattern": "biosense.deltabots.com.br", "custom_domain": true }],
+  "workers_dev": true,
+
+  // Um Durable Object por pulseira (conexões WebSocket + tempo real) e um
+  // "Fleet" único para o fluxo global de todos os pacientes.
+  "durable_objects": {
+    "bindings": [
+      { "name": "HUB", "class_name": "DeviceHub" },
+      { "name": "FLEET", "class_name": "Fleet" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DeviceHub", "Fleet"] }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "biosense",
+      "database_id": "e64ab743-dad8-4210-98ff-9df94a060149",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Painel de administração (public/admin). As rotas /v1/* sempre vão para o Worker.
+  "assets": { "directory": "./public", "run_worker_first": ["/v1/*"] },
+
+  // Limpeza diária de dados antigos (RETENTION_DAYS).
+  "triggers": { "crons": ["17 3 * * *"] },
+
+  "vars": {
+    "RETENTION_DAYS": "365"
+  }
+  // Segredo obrigatório:  npx wrangler secret put ADMIN_API_KEY
+}
