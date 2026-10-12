@@ -1,82 +1,49 @@
-# Mi Band 3 — app Android
+# BIOSENSE — app Android e serviço na nuvem
 
-App Android (Kotlin + Jetpack Compose) que pareia, controla e troca mensagens com uma **Xiaomi Mi Band 3** via Bluetooth Low Energy, sem depender do Mi Fit / Zepp Life.
+**BIOSENSE** é um produto da Deltabots (Divisão de Pesquisas Avançadas em IA e Bioconexões). O app Android conecta a pulseira disponibilizada pela equipe (uma Xiaomi Mi Band 3, exibida como *Biosense Pulse*), coleta os sinais e envia à nuvem em tempo real. O participante vê **apenas a instalação guiada e o status** — nenhum dado de saúde, gráfico ou controle. A equipe técnica tem uma área protegida para configuração e testes.
 
-## Funcionalidades
-
-| Área | O que faz |
+| Pasta | Conteúdo |
 | --- | --- |
-| **Pareamento** | Procura dispositivos BLE, grava uma chave AES própria na pulseira (você confirma tocando na tela dela) e autentica sozinho nas próximas conexões. Reconecta automaticamente se a conexão cair. |
-| **Painel** | Bateria (e se está carregando), passos, distância e calorias em tempo real, firmware/hardware/número de série, botão para vibrar. |
-| **Frequência cardíaca** | Medição sob demanda ou monitoramento contínuo. |
-| **Conversar** | Envia SMS, notificação de app, e-mail ou chamada simulada (com nome de quem liga) para a tela da pulseira. Um histórico em formato de chat mostra o que o celular enviou e os eventos que a pulseira mandou de volta: botão pressionado, chamada rejeitada, meta de passos, pulseira retirada etc. |
-| **Procurar celular** | Quando você usa "Encontrar celular" na pulseira, o celular toca até você confirmar. |
-| **Alarmes** | Três alarmes gravados na própria pulseira, com dias da semana ou "apenas uma vez". |
-| **Nuvem** | Envia FC (uma medição a cada 30 min por padrão; configurável de 5 min a contínua), passos, bateria, eventos e o histórico de sono/atividade em tempo real, por WebSocket, a um serviço próprio no Cloudflare (pasta [`cloud/`](cloud/README.md)), e executa comandos remotos (vibrar, mensagem, medir FC, alarmes). Pensado para monitorar pacientes à distância. |
-| **Ajustes** | Relógio de 12/24 h, acender a tela ao levantar o pulso, sincronizar data e hora, encaminhar automaticamente as notificações do celular (WhatsApp, Telegram, Instagram, chamadas… cada uma com o ícone certo na pulseira). |
+| `app/` | App Android (Kotlin + Jetpack Compose + Material 3). |
+| `cloud/` | Serviço Cloudflare Workers + Durable Objects + D1 ([documentação](cloud/README.md)). |
 
-Um serviço em primeiro plano mantém a conexão ativa com o app em segundo plano.
+## Fluxo do app
 
-## Requisitos
+1. **Abertura** nativa (símbolo + assinatura). A rota sai do estado salvo: primeiro uso → consentimento; consentimento válido sem vínculo → tutorial; instalação concluída → principal.
+2. **Participação voluntária**: resumo do programa, termo completo **versionado vindo da nuvem**, checkbox desmarcado. "Concordar e continuar" só conclui quando o servidor grava o aceite (`POST /v1/installations`); sem rede ou com termo desatualizado, nada é dado como aceito. "Não participar" não cria instalação nem coleta nada.
+3. **Tutorial (3 etapas)**: permissões nativas do Android (com recuperação após negativa e atalho para as configurações após negativa permanente), busca BLE real só de pulseiras compatíveis, autenticação real com a pulseira (o pedido de toque aparece só quando o handshake pede) e confirmação de conexão com o serviço. "Concluir instalação" exige pulseira autenticada e serviço conectado.
+4. **Principal**: "Status do dispositivo" derivado de permissão, Bluetooth, pulseira, nuvem, autorização e confirmação de presença recente (7 estados do guia) + cartão de participação.
+5. **Acesso técnico**: 5 toques em até 2,5 s (no máximo 600 ms entre toques) revelam o login. A credencial é validada **só na nuvem**; sessão presa à instalação, expira com 10 min de inatividade e nunca é restaurada após o app ser encerrado.
+6. **Configuração e testes**: dados da instalação, autorização/vínculo do participante (escopo `provision`), perfil de coleta definido na nuvem, e testes reais de Bluetooth (leitura BLE), vibração (escrita BLE confirmada; a vibração física precisa ser confirmada visualmente), FC (leitura com horário), histórico e comunicação com a nuvem (REST + WebSocket), com registro da sessão.
 
-- Android 8.0 (API 26) ou superior, com Bluetooth LE.
-- Android Studio Ladybug ou mais recente (AGP 8.7, Kotlin 2.0, JDK 17).
+A coleta roda num serviço em primeiro plano (notificação obrigatória do Android mostra só o status), reconecta à pulseira e à nuvem indefinidamente, guarda a telemetria numa **fila em arquivo** e só a descarta quando a nuvem confirma a gravação do lote (`stored`). Antes do consentimento, e enquanto a instalação não for autorizada pela equipe, nada é coletado nem enviado (a nuvem também recusa).
 
-## Versões do APK
-
-| APK | Para quem |
-| --- | --- |
-| `app-padrao-debug.apk` | Todas as funções, **exceto** encaminhar as notificações do celular. O Play Protect deixa instalar normalmente. |
-| `app-completo-debug.apk` | Inclui o encaminhamento de notificações. O Play Protect pode **bloquear** a instalação de APKs baixados fora da loja que leem notificações (proteção contra fraude ativa no Brasil). Instale via `adb install` pelo computador. |
-
-## Como compilar
+## Compilar
 
 ```bash
-./gradlew assembleDebug             # gera app/build/outputs/apk/{padrao,completo}/debug/*.apk
-./gradlew testPadraoDebugUnitTest   # testes do protocolo
+./gradlew testDebugUnitTest                                              # testes JVM
+./gradlew assembleDebug -Pbiosense.cloudUrl=https://SEU-WORKER.workers.dev # APK
 ```
 
-Ou abra a pasta no Android Studio e clique em *Run*. O workflow do GitHub Actions (`.github/workflows/android.yml`) também gera o APK a cada push e o publica como artefato `miband3-debug-apk`.
+O endereço do serviço vai para o APK no build (`BuildConfig.CLOUD_URL`; também aceita a variável de ambiente `BIOSENSE_CLOUD_URL`). Não é segredo e **nenhuma chave administrativa vai no APK**. No GitHub Actions, defina a variável de repositório `BIOSENSE_CLOUD_URL` (Settings → Secrets and variables → Actions → Variables); o APK sai no artefato `biosense-debug-apk`. Sem o endereço, o app abre mas informa que o serviço não está configurado.
 
-## Primeiro uso
+Requisitos: Android 8.0+ com BLE; Android Studio Ladybug+ (AGP 8.7, Kotlin 2.0, JDK 17).
 
-1. Se a pulseira estiver vinculada ao Mi Fit / Zepp Life, **desvincule-a** antes (ou faça um reset de fábrica na pulseira). Ela aceita só um app pareado por vez.
-2. Abra o app, conceda as permissões de Bluetooth e ligue o Bluetooth.
-3. Toque na Mi Band 3 na lista (ela aparece destacada).
-4. Quando a pulseira vibrar, **toque na tela dela** para autorizar.
-5. Para encaminhar notificações: em **Ajustes**, ative a opção e libere o acesso às notificações.
+## Antes do primeiro participante (nuvem)
 
-## Como funciona (protocolo)
+Veja `cloud/README.md`. Em resumo: publicar o serviço, **publicar o termo de participação real** (`POST /v1/consent/terms` — o app não deixa aderir sem ele), criar as credenciais dos técnicos (`POST /v1/technicians`) e, depois de cada instalação, autorizá-la (pela área técnica do app, com escopo `provision`, ou `POST /v1/devices/{id}/authorize`).
 
-O código fica em `app/src/main/java/com/miband3/app/ble/`:
+## Protocolo da pulseira
 
-- `MiBandUuids.kt`: serviços e características GATT (`FEE0`/`FEE1` da Huami + serviços BLE padrão).
-- `MiBandProtocol.kt`: monta e interpreta os pacotes. É código puro, coberto por testes JVM.
-  - **UUIDs**: as características próprias da Xiaomi/Huami usam a base `0000xxxx-0000-3512-2118-0009af100700`.
-  - **Autenticação** (característica `0009`): `01 00 <chave>` grava a chave, `02 00` pede um número aleatório, `03 00 <AES-ECB(aleatório)>` responde ao desafio. As respostas chegam como `10 xx 01`. A flag é `00` na Mi Band 3; o `08` do Amazfit Bip faz a pulseira aceitar a chave mas continuar na tela de pareamento.
-  - **Perfil** (característica `0008`): nascimento, sexo, altura, peso, pulso e meta de passos, enviados logo após autenticar.
-  - **Mensagens**: *New Alert* (`2A46`) com categoria (SMS `05`, chamada `03`, e-mail `01`, app customizado `FA` + ícone) e o texto `título\0corpo` em UTF-8.
-  - **Vibrar**: *Alert Level* (`2A06`).
-  - **Frequência cardíaca**: controle `2A39` (`15 02 01` manual, `15 01 01` contínuo + ping `16` a cada 12 s), leitura em `2A37`.
-  - **Bateria / passos**: características `0006` / `0007`.
-  - **Eventos da pulseira**: notificações em `0010`.
-  - **Alarmes e ajustes**: característica de configuração `0003`.
-- `GattQueue.kt`: fila que serializa as operações GATT, já que o Android só permite uma por vez.
-- `MiBandManager.kt`: conexão, máquina de estados da autenticação, comandos e estado exposto via `StateFlow` para a UI.
+`app/src/main/java/com/miband3/app/ble/`: `MiBandProtocol.kt` (pacotes, testado na JVM), `GattQueue.kt` (fila GATT serializada), `MiBandManager.kt` (conexão, autenticação AES, reconexão, comandos, histórico por minuto). Baseado na engenharia reversa do [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge).
 
-O protocolo foi baseado no trabalho de engenharia reversa do projeto [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge).
+## Pendências e limites conhecidos
 
-## Monitoramento remoto (nuvem)
+Validação feita até aqui: testes JVM (protocolo, mensagens, fila persistente, status derivado, gesto, rota inicial), 41 testes do serviço no runtime real do Workers e compilação do APK no CI. **Nada disso substitui teste em aparelho e pulseira reais**, que ainda não foi feito.
 
-A pasta [`cloud/`](cloud/README.md) contém o serviço (Cloudflare Workers + Durable Objects + D1) com API REST/WebSocket completa: dados ao vivo, histórico, alertas com regras, webhooks e comandos para a pulseira. No app, a aba **Nuvem** recebe o endereço do serviço e o token da pulseira. O app reconecta sozinho, guarda os dados enquanto está sem internet e mantém o serviço em primeiro plano.
-
-```bash
-cd cloud && npm install && npm test      # 30 testes no runtime real do Workers
-```
-
-## Limitações conhecidas
-
-- O download do histórico por minuto (base do cálculo de sono) segue o protocolo do Gadgetbridge, mas **ainda não foi testado numa Mi Band 3 real**; os códigos de categoria de sono são provisórios (veja `cloud/README.md`).
-
-- Não baixa o histórico de atividade e sono, nem atualiza firmware. Mostra só os dados em tempo real.
-- Textos muito longos são truncados (cerca de 200 bytes) e a pulseira só exibe caracteres que a fonte dela suporta.
+- **Termo de participação**: o conteúdo completo, o meio de solicitar a retirada e o contato precisam ser fornecidos pela equipe responsável e publicados na nuvem. O app não inventa esse texto.
+- **Histórico por minuto / sono**: o download segue o Gadgetbridge, mas não foi validado numa Mi Band 3 real; a classificação de sono na nuvem é provisória.
+- **Autorização da instalação**: hoje é feita pela área técnica (escopo `provision`) ou pela API; não há painel web.
+- **Perfil do usuário na pulseira** (altura, peso, nascimento) usa valores padrão; ainda não vem da nuvem.
+- **Acessibilidade e layout**: componentes usam sp/dp, alvos de 48 dp, rolagem e rótulos para TalkBack, mas a verificação em 360 dp, 412 dp, fonte ampliada e TalkBack precisa ser feita no aparelho.
+- O identificador do pacote continua `com.miband3.app` para permitir atualizar por cima das instalações existentes.

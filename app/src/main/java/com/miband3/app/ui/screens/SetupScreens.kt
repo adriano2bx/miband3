@@ -214,7 +214,10 @@ fun SetupSelectScreen(onBack: () -> Unit, onConnect: () -> Unit) {
         }
         onDispose { MiBandManager.stopScan() }
     }
-    if (selected != null && devices.none { it.address == selected } && !scanning) selected = null
+    // A pulseira escolhida sumiu da nova busca: desfaz a seleção.
+    LaunchedEffect(devices, scanning) {
+        if (selected != null && devices.none { it.address == selected } && !scanning) selected = null
+    }
 
     ScreenLayout(
         onBack = onBack,

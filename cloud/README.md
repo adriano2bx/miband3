@@ -27,7 +27,7 @@ npx wrangler secret put ADMIN_API_KEY     # chave mestra: use um valor longo e a
 npx wrangler deploy
 ```
 
-Desenvolvimento local: `npm run db:migrate:local && ADMIN_API_KEY=dev npx wrangler dev`. Testes: `npm test` (roda no runtime real do Workers via Miniflare). Tipos: `npm run typecheck`.
+Desenvolvimento local: `npm run db:migrate:local && ADMIN_API_KEY=dev npx wrangler dev`. Testes: `npm test` (41 testes no runtime real do Workers via Miniflare). Tipos: `npm run typecheck`.
 
 ## Primeiros passos
 
@@ -46,6 +46,34 @@ curl -X POST $API/v1/devices/dev_xxx/vibrate -H "$H" -H 'content-type: applicati
 ```
 
 A especificação completa está em **`GET /v1/openapi.json`** (sem autenticação; importe no Swagger/Postman).
+
+## Participantes (BIOSENSE)
+
+O app do participante usa contratos próprios (`src/participant-api.ts`):
+
+```bash
+# 1. Publique o termo real (versões não são editadas; uma nova versão pode exigir novo aceite)
+curl -X POST $API/v1/consent/terms -H "$H" -H 'content-type: application/json' -d '{
+  "version": "2026.1", "title": "Termo de participação", "content": "<texto completo fornecido pela equipe>",
+  "requires_reconsent": true }'
+
+# 2. Crie técnicos (senha ≥ 10 caracteres; "provision" permite autorizar instalações pelo app)
+curl -X POST $API/v1/technicians -H "$H" -H 'content-type: application/json' \
+     -d '{"credential":"ana.souza","name":"Ana Souza","password":"<senha forte>","scopes":["tech","provision"]}'
+
+# 3. Ajuste o perfil de coleta de uma instalação (chega ao app em tempo real)
+curl -X PUT $API/v1/devices/dev_xxx/config -H "$H" -H 'content-type: application/json' -d '{"hr_interval_min":30}'
+```
+
+| Etapa | O que acontece |
+| --- | --- |
+| Adesão | `POST /v1/installations` (público) grava o aceite do termo vigente e cria a instalação **pendente**, devolvendo o token do dispositivo. |
+| Autorização | Técnico com `provision` (no app) ou `POST /v1/devices/{id}/authorize` vincula `participant_ref` e ativa a instalação. Antes disso a telemetria é recusada. |
+| Consentimento | Recusa (`POST /v1/consent` com `accepted:false`) ou termo novo que exige reaceite interrompem a telemetria até novo aceite. Histórico em `GET /v1/devices/{id}/consents`. |
+| Bloqueio | `POST /v1/devices/{id}/revoke` derruba o app (código 4003) e impede reconexão (403). |
+| Login técnico | `POST /v1/tech/login` (credencial, senha, token da instalação) → sessão `mbt_…` de 10 min de inatividade (8 h no máximo). 5 erros bloqueiam a credencial por 15 min. |
+
+Telemetria: o app envia lotes `{"t":"batch","seq":N,...}`; a nuvem responde `{"t":"stored","seq":N,"accepted":true}` só depois de gravar no D1 (ou `accepted:false` se a instalação não pode enviar). Eventos levam `id` para não duplicar em reenvios.
 
 ## Autenticação e permissões
 
