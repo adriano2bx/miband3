@@ -18,20 +18,36 @@
 
 A coleta roda num serviço em primeiro plano (notificação obrigatória do Android mostra só o status), reconecta à pulseira e à nuvem indefinidamente, guarda a telemetria numa **fila em arquivo** e só a descarta quando a nuvem confirma a gravação do lote (`stored`). Antes do consentimento, e enquanto a instalação não for autorizada pela equipe, nada é coletado nem enviado (a nuvem também recusa).
 
-## Compilar
+## Publicar e entregar
+
+Tudo roda em **https://biosense.deltabots.com.br** (painel em `/admin/`, API em `/v1`). O banco D1 `biosense` já está criado na conta Cloudflare, com as tabelas e o técnico inicial.
+
+1. Em *Settings → Secrets and variables → Actions → Secrets* do repositório, crie:
+   - `CLOUDFLARE_API_TOKEN` — token com *Workers Scripts: Edit* e *D1: Edit* (conta) e *Workers Routes: Edit* + *DNS: Edit* na zona `deltabots.com.br`;
+   - `CLOUDFLARE_ACCOUNT_ID` — ID da conta;
+   - `ADMIN_API_KEY` — chave mestra do painel (≥ 32 caracteres aleatórios).
+2. Em *Actions → Deploy BIOSENSE → Run workflow*. O workflow testa, aplica migrações, publica o Worker com o domínio, grava a chave mestra, confere `/v1/health` e gera o APK (artefato `biosense-apk`) apontando para o endereço publicado.
+3. No painel `/admin/` (entre com a chave mestra): publique o **termo de participação** revisado (há um rascunho em `docs/termo-participacao-RASCUNHO.md`) e gerencie técnicos.
+4. Instale o APK, faça a adesão no celular e autorize a instalação (pelo painel ou pela área técnica do app).
+
+O CI comum (`Android`) também gera um APK (artefato `biosense-debug-apk`) apontando para o domínio oficial e publica capturas de todas as telas (artefato `biosense-screens`) em 360 dp, 412 dp e 412 dp com fonte 1,3×.
+
+## Compilar localmente
 
 ```bash
-./gradlew testDebugUnitTest                                              # testes JVM
-./gradlew assembleDebug -Pbiosense.cloudUrl=https://SEU-WORKER.workers.dev # APK
+./gradlew testDebugUnitTest                                   # testes JVM
+./gradlew recordPaparazziDebug                                # + capturas em app/src/test/snapshots
+./gradlew assembleDebug                                       # APK (domínio oficial)
+./gradlew assembleDebug -Pbiosense.cloudUrl=http://10.0.2.2:8787  # APK contra um wrangler dev local
 ```
 
-O endereço do serviço vai para o APK no build (`BuildConfig.CLOUD_URL`; também aceita a variável de ambiente `BIOSENSE_CLOUD_URL`). Não é segredo e **nenhuma chave administrativa vai no APK**. No GitHub Actions, defina a variável de repositório `BIOSENSE_CLOUD_URL` (Settings → Secrets and variables → Actions → Variables); o APK sai no artefato `biosense-debug-apk`. Sem o endereço, o app abre mas informa que o serviço não está configurado.
+Requisitos: Android 8.0+ com BLE; Android Studio Ladybug+ (AGP 8.7, Kotlin 2.0, JDK 17). Nenhuma chave administrativa vai no APK.
 
-Requisitos: Android 8.0+ com BLE; Android Studio Ladybug+ (AGP 8.7, Kotlin 2.0, JDK 17).
+## Antes do primeiro participante
 
-## Antes do primeiro participante (nuvem)
-
-Veja `cloud/README.md`. Em resumo: publicar o serviço, **publicar o termo de participação real** (`POST /v1/consent/terms` — o app não deixa aderir sem ele), criar as credenciais dos técnicos (`POST /v1/technicians`) e, depois de cada instalação, autorizá-la (pela área técnica do app, com escopo `provision`, ou `POST /v1/devices/{id}/authorize`).
+- **Termo**: publicar no painel a versão revisada (o app não deixa aderir sem termo publicado).
+- **Técnicos**: o técnico inicial (Adriano de Oliveira Maria) já existe, com permissão para autorizar instalações. A senha informada deve ser trocada pelo painel (*Técnicos → Nova senha*) assim que o serviço estiver publicado.
+- **Autorização**: cada instalação nasce pendente; vincule a referência do participante (código) pelo painel ou pela área técnica do app.
 
 ## Protocolo da pulseira
 
@@ -39,11 +55,10 @@ Veja `cloud/README.md`. Em resumo: publicar o serviço, **publicar o termo de pa
 
 ## Pendências e limites conhecidos
 
-Validação feita até aqui: testes JVM (protocolo, mensagens, fila persistente, status derivado, gesto, rota inicial), 41 testes do serviço no runtime real do Workers e compilação do APK no CI. **Nada disso substitui teste em aparelho e pulseira reais**, que ainda não foi feito.
+Validação feita: testes JVM (protocolo, mensagens, fila persistente, status derivado, gesto, rota inicial, parsers), capturas Paparazzi de todas as telas, 41 testes do serviço no runtime real do Workers, painel testado no navegador contra o Worker local e compilação do APK no CI. **Ainda não houve teste em aparelho Android com a pulseira real**, nem com o serviço publicado.
 
-- **Termo de participação**: o conteúdo completo, o meio de solicitar a retirada e o contato precisam ser fornecidos pela equipe responsável e publicados na nuvem. O app não inventa esse texto.
-- **Histórico por minuto / sono**: o download segue o Gadgetbridge, mas não foi validado numa Mi Band 3 real; a classificação de sono na nuvem é provisória.
-- **Autorização da instalação**: hoje é feita pela área técnica (escopo `provision`) ou pela API; não há painel web.
-- **Perfil do usuário na pulseira** (altura, peso, nascimento) usa valores padrão; ainda não vem da nuvem.
-- **Acessibilidade e layout**: componentes usam sp/dp, alvos de 48 dp, rolagem e rótulos para TalkBack, mas a verificação em 360 dp, 412 dp, fonte ampliada e TalkBack precisa ser feita no aparelho.
+- **Publicação**: depende dos três segredos acima (não tenho acesso para criar o token da Cloudflare). O domínio exige que a zona `deltabots.com.br` esteja na mesma conta.
+- **Termo**: o rascunho precisa de revisão jurídica e dos campos marcados com [PREENCHER] (canal de retirada, DPO, retenção, transferência internacional).
+- **Histórico por minuto / sono**: segue o Gadgetbridge, mas não foi validado numa Mi Band 3 real; a classificação de sono é provisória.
+- **TalkBack**: os componentes têm rótulos e regiões ao vivo, mas a navegação com leitor de tela precisa ser conferida no aparelho.
 - O identificador do pacote continua `com.miband3.app` para permitir atualizar por cima das instalações existentes.

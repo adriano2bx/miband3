@@ -17,15 +17,18 @@ Serviço em Cloudflare Workers que recebe, em tempo real, os dados das pulseiras
 
 ## Publicar
 
+O caminho recomendado é o workflow **Deploy BIOSENSE** (veja o README principal): ele aplica as migrações no D1 `biosense` (já criado), publica em `biosense.deltabots.com.br`, grava a chave mestra e gera o APK. Manualmente:
+
 ```bash
-cd cloud
-npm install
-npx wrangler login
-npx wrangler d1 create miband3            # copie o database_id para wrangler.jsonc
-npx wrangler d1 migrations apply miband3 --remote
-npx wrangler secret put ADMIN_API_KEY     # chave mestra: use um valor longo e aleatório
+cd cloud && npm install && npx wrangler login
+npx wrangler d1 migrations apply biosense --remote
 npx wrangler deploy
+npx wrangler secret put ADMIN_API_KEY     # chave mestra: longa e aleatória
 ```
+
+## Painel de administração
+
+`https://biosense.deltabots.com.br/admin/` (a raiz redireciona para ele). Entre com a chave mestra ou uma chave `mbk_` com escopo `manage`; ela fica só na aba do navegador. Permite autorizar e bloquear instalações, definir o perfil de coleta e o perfil físico da pulseira, ver o histórico de consentimentos, publicar o termo, gerenciar técnicos e reconhecer alertas.
 
 Desenvolvimento local: `npm run db:migrate:local && ADMIN_API_KEY=dev npx wrangler dev`. Testes: `npm test` (41 testes no runtime real do Workers via Miniflare). Tipos: `npm run typecheck`.
 
