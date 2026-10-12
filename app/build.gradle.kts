@@ -14,8 +14,8 @@ android {
         applicationId = "com.miband3.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.0.1"
 
         // Endereço do serviço BIOSENSE na nuvem (não é segredo). Padrão: o domínio oficial;
         // para testes use -Pbiosense.cloudUrl=... ou a variável de ambiente BIOSENSE_CLOUD_URL.

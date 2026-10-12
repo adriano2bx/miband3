@@ -98,6 +98,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validar imagens do Android
+        run: python3 scripts/validate_png_resources.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
