@@ -85,9 +85,11 @@ async function start() {
     if (!canRead) return logout("Esta credencial não tem permissão de leitura.");
     $("#who").textContent = me.id === "admin" ? "Gestão" : me.id.startsWith("tech:") ? (sessionStorage.getItem(TECH_NAME) || "Técnico") : canManage ? "Gestão" : "Leitura";
     $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
-    // Sem gestão (seguidor/técnico só-leitura): vê a visão consolidada de Pacientes.
+    // Sem gestão (seguidor/técnico só-leitura): Pacientes (consolidado) + Monitoramento
+    // (detalhe por dispositivo), ambos já escopados aos devices da conta.
+    const readerTabs = ["patients", "monitor"];
     document.querySelectorAll("nav [data-tab]").forEach((button) => {
-      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "patients");
+      button.classList.toggle("hidden", !canManage && !readerTabs.includes(button.dataset.tab));
     });
     if (canManage) {
       document.querySelector('[data-tab="installs"]').click();
@@ -745,6 +747,41 @@ function drawPatientHr(box, rows, hasBand) {
   box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${Math.min(...points.map((p) => p.value))}–${Math.max(...points.map((p) => p.value))} bpm`, dateLabel(points.at(-1).ts)));
 }
 
+// Exportação CSV: pagina a série pelo cursor e monta o arquivo no cliente (histórico completo).
+async function fetchAllRows(deviceId, stream, from, to) {
+  const rows = [];
+  let cursorFrom = from;
+  for (let i = 0; i < 400; i++) {
+    const q = new URLSearchParams({ from: String(cursorFrom), to: String(to), limit: "10000", order: "asc" });
+    const res = await api("GET", `/v1/devices/${encodeURIComponent(deviceId)}/${stream}?${q}`);
+    const data = res.data || [];
+    rows.push(...data);
+    if (!res.next || res.next.from == null || !data.length) break;
+    cursorFrom = res.next.from;
+  }
+  return rows;
+}
+function rowsToCsv(rows) {
+  if (!rows.length) return "";
+  const cols = Object.keys(rows[0]);
+  const esc = (v) => {
+    if (v && typeof v === "object") v = JSON.stringify(v);
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+}
+async function exportStream(deviceId, stream, label, from, to) {
+  flash(`Exportando ${label}…`);
+  const rows = await fetchAllRows(deviceId, stream, from, to);
+  const blob = new Blob([rowsToCsv(rows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: `${label}-${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  flash(`${label}: ${rows.length} registro(s) exportado(s).`);
+}
+
 function drawPatientSteps(box, rows, hasBand) {
   const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.steps) })).filter((p) => Number.isFinite(p.value));
   if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de passos neste período." : "Paciente sem pulseira vinculada.")); return; }
@@ -771,6 +808,17 @@ async function loadPatientData() {
     const band = detail.devices.find((d) => d.type === "miband");
     const cgm = detail.devices.find((d) => d.type === "cgm");
     renderPatientHeader(detail, band, cgm);
+
+    const exp = $("#patExport"); exp.replaceChildren();
+    if (band) {
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(band.id, "heart-rate", `FC-${detail.name}`, from, to)) }, "FC"));
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(band.id, "steps", `Passos-${detail.name}`, from, to)) }, "Passos"));
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(band.id, "events", `Eventos-${detail.name}`, from, to)) }, "Eventos"));
+    }
+    if (cgm) {
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(cgm.id, "glucose", `Glicemia-${detail.name}`, from, to)) }, "Glicemia"));
+    }
+    if (!band && !cgm) exp.replaceChildren(el("span", { class: "muted" }, "Sem dispositivos."));
 
     $("#kGluNow").textContent = patient.last_glucose != null ? mmolLabel(patient.last_glucose) : "—";
     $("#kGluNowAt").textContent = patient.last_glucose_ts ? dateLabel(patient.last_glucose_ts) : "sem leituras";

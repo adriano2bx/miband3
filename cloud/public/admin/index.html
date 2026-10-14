@@ -103,7 +103,7 @@
       </div>
       <div class="monitor-filters">
         <div><label for="monitorDevice">Participante / instalação</label><select id="monitorDevice"></select></div>
-        <div><label for="monitorRange">Período</label><select id="monitorRange"><option value="86400000">Últimas 24 horas</option><option value="604800000" selected>Últimos 7 dias</option><option value="2592000000">Últimos 30 dias</option></select></div>
+        <div><label for="monitorRange">Período</label><select id="monitorRange"><option value="86400000">Últimas 24 horas</option><option value="604800000" selected>Últimos 7 dias</option><option value="2592000000">Últimos 30 dias</option><option value="7776000000">Últimos 90 dias</option><option value="31536000000">Último 1 ano</option></select></div>
       </div>
       <div id="monitorNotice" class="notice hidden" role="status"></div>
       <dl class="monitor-kpis" aria-label="Resumo do período">
@@ -152,7 +152,10 @@
           <option value="86400000">Últimas 24 horas</option>
           <option value="604800000">Últimos 7 dias</option>
           <option value="1209600000" selected>Últimos 14 dias</option>
-          <option value="2592000000">Últimos 30 dias</option></select></div>
+          <option value="2592000000">Últimos 30 dias</option>
+          <option value="7776000000">Últimos 90 dias</option>
+          <option value="31536000000">Último 1 ano</option></select></div>
+        <div class="pat-export-field"><label>Exportar histórico (CSV)</label><div class="actions" id="patExport"></div></div>
       </div>
       <div id="patNotice" class="notice hidden" role="status"></div>
       <div id="patHeader" class="patient-header"></div>

@@ -257,3 +257,5 @@
 .glu-dot { fill: #126C64; stroke: #fff; stroke-width: 1.5; }
 .glu-dot.lowdot { fill: #d64545; }
 .glu-dot.highdot { fill: #e0a100; }
+.pat-export-field .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
+#patExport .btn { min-height: 34px; padding: 6px 10px; font-size: 12px; }
