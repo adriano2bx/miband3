@@ -1,7 +1,8 @@
 import type { Env } from "./types";
 import { compare, describeRule, type AlertRule } from "./alerts";
 import { deliverWebhooks } from "./webhooks";
-import { newId } from "./util";
+import { createCommand } from "./commands";
+import { newId, parseJson } from "./util";
 
 /**
  * Integração somente-leitura com a AiDEX API Open Platform (OAuth 2.0).
@@ -262,6 +263,19 @@ export async function evaluateGlucoseAlerts(env: Env, deviceId: string): Promise
   const { results: rules } = await env.DB.prepare(
     "SELECT * FROM alert_rules WHERE enabled = 1 AND metric = 'glucose' AND threshold IS NOT NULL AND (device_id IS NULL OR device_id = ?)",
   ).bind(deviceId).all<AlertRule>();
+
+  // A pulseira (miband) do mesmo paciente, para avisar o voluntário (vibrar/mensagem).
+  let bandId: string | null | undefined;
+  const patientBand = async () => {
+    if (bandId === undefined) {
+      const row = await env.DB.prepare(
+        "SELECT d.id FROM devices d JOIN devices c ON c.patient_id = d.patient_id WHERE c.id = ? AND d.type = 'miband' AND d.archived_at IS NULL LIMIT 1",
+      ).bind(deviceId).first<{ id: string }>();
+      bandId = row ? row.id : null;
+    }
+    return bandId;
+  };
+
   let fired = 0;
   for (const rule of rules) {
     if (!compare(rule.op, latest.mmol, rule.threshold!)) continue;
@@ -272,9 +286,35 @@ export async function evaluateGlucoseAlerts(env: Env, deviceId: string): Promise
     await env.DB.prepare("INSERT INTO alerts (id, device_id, rule_id, ts, metric, value, severity, message) VALUES (?,?,?,?,?,?,?,?)")
       .bind(id, deviceId, rule.id, latest.ts, "glucose", latest.mmol, rule.severity, message).run();
     await deliverWebhooks(env, "alert.created", deviceId, { id, device_id: deviceId, rule_id: rule.id, ts: latest.ts, metric: "glucose", value: latest.mmol, severity: rule.severity, message, rule_name: rule.name }).catch(() => {});
+
+    // Ação automática: avisar o voluntário na pulseira dele (vibrar / mensagem).
+    const action = parseJson<{ vibrate?: Record<string, unknown> | boolean; message?: Record<string, unknown> }>(rule.action, {});
+    if (action.vibrate || action.message) {
+      const band = await patientBand();
+      if (band) {
+        if (action.vibrate) await createCommand(env, band, { type: "vibrate", params: typeof action.vibrate === "object" ? action.vibrate : {}, ttl_s: 60 }, `rule:${rule.id}`).catch(() => {});
+        if (action.message) await createCommand(env, band, { type: "message", params: action.message, ttl_s: 120 }, `rule:${rule.id}`).catch(() => {});
+      }
+    }
     fired++;
   }
   return fired;
+}
+
+/** Cria regras de alerta de glicemia padrão (uma vez) para o sensor ao conectar. Faixas em mmol/L. */
+export async function seedDefaultGlucoseRules(env: Env, deviceId: string): Promise<number> {
+  const existing = await env.DB.prepare("SELECT COUNT(*) AS n FROM alert_rules WHERE metric = 'glucose' AND device_id = ?").bind(deviceId).first<{ n: number }>();
+  if ((existing?.n ?? 0) > 0) return 0;
+  const now = Date.now();
+  const defaults = [
+    { name: "Hipoglicemia crítica (< 3,0)", op: "lt", threshold: 3.0, severity: "critical", cooldown_s: 1800 },
+    { name: "Glicemia baixa (< 3,9)", op: "lt", threshold: 3.9, severity: "warning", cooldown_s: 1800 },
+    { name: "Glicemia alta (> 13,9)", op: "gt", threshold: 13.9, severity: "warning", cooldown_s: 3600 },
+  ];
+  await env.DB.batch(defaults.map((d) => env.DB.prepare(
+    "INSERT INTO alert_rules (id, device_id, name, metric, op, threshold, duration_s, cooldown_s, severity, action, enabled, created_at) VALUES (?,?,?,?,?,?,0,?,?,'{}',1,?)",
+  ).bind(newId("rul"), deviceId, d.name, "glucose", d.op, d.threshold, d.cooldown_s, d.severity, now)));
+  return defaults.length;
 }
 
 // ------------------------------------------------------------------ análise

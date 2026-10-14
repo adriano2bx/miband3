@@ -8,6 +8,18 @@ import { pollAll } from "./aidex";
 export { DeviceHub } from "./hub";
 export { Fleet } from "./fleet";
 
+/**
+ * Marca como offline os devices "presos" em online (ex.: a pulseira saiu sem fechar
+ * a conexão e o socket ficou zumbi). Limiar generoso para não derrubar pulseira
+ * conectada e ociosa. Corrige o flag usado no overview; o alerta de offline continua
+ * no Durable Object.
+ */
+const PRESENCE_STALE_MS = 3 * 3600_000;
+async function reconcilePresence(env: Env): Promise<void> {
+  const cutoff = Date.now() - PRESENCE_STALE_MS;
+  await env.DB.prepare("UPDATE devices SET online = 0 WHERE online = 1 AND (last_seen_at IS NULL OR last_seen_at < ?)").bind(cutoff).run();
+}
+
 /** Poda os dados antigos conforme RETENTION_DAYS e as sessões expiradas. */
 async function cleanup(env: Env): Promise<void> {
   const now = Date.now();
@@ -49,6 +61,7 @@ export default {
    */
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(pollAll(env));
+    ctx.waitUntil(reconcilePresence(env));
     const now = new Date();
     // A janela das 03:00 UTC é atingida só pela execução das 03:00 (minuto < 15).
     if (now.getUTCHours() === 3 && now.getUTCMinutes() < 15) {

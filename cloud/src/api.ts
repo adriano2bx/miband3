@@ -614,6 +614,8 @@ api.post("/v1/devices/:id/aidex/connect", deviceRoute("manage"), async (c) => {
   ).bind(id, env, state, now, now).run();
   // Um device com vínculo AiDEX é, por definição, um sensor CGM.
   await c.env.DB.prepare("UPDATE devices SET type = 'cgm', updated_at = ? WHERE id = ?").bind(now, id).run();
+  // Regras de alerta de glicemia padrão (hipo/hiper), uma vez por sensor.
+  await aidex.seedDefaultGlucoseRules(c.env, id).catch(() => {});
   return c.json({ authorize_url: aidex.authorizeUrl(c.env, env, state), env });
 });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
 import { call, newDevice } from "./helpers";
-import { parseApiTime, summarize, toApiTime, mmolToMgdl, authorizeUrl, evaluateGlucoseAlerts } from "../src/aidex";
+import { parseApiTime, summarize, toApiTime, mmolToMgdl, authorizeUrl, evaluateGlucoseAlerts, seedDefaultGlucoseRules } from "../src/aidex";
 
 describe("aidex — lógica pura", () => {
   it("toApiTime/parseApiTime fazem round-trip em UTC", () => {
@@ -134,6 +134,28 @@ describe("aidex — rotas", () => {
     const alerts = await call("GET", `/v1/alerts?device_id=${d.id}&from=0&to=99999999999999`);
     expect(alerts.json.data.length).toBe(1);
     expect(alerts.json.data[0].metric).toBe("glucose");
+  });
+
+  it("seedDefaultGlucoseRules cria 3 regras padrão (idempotente)", async () => {
+    const d = await newDevice("CGM defaults");
+    expect(await seedDefaultGlucoseRules(env, d.id)).toBe(3);
+    expect(await seedDefaultGlucoseRules(env, d.id)).toBe(0);
+    const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM alert_rules WHERE metric='glucose' AND device_id=?").bind(d.id).first<{ n: number }>();
+    expect(row!.n).toBe(3);
+  });
+
+  it("alerta de glicemia vibra a pulseira do mesmo voluntário", async () => {
+    const pid = (await call("POST", "/v1/patients", { body: { name: "V auto" } })).json.id as string;
+    const band = (await call("POST", "/v1/devices", { body: { name: "Band", patient_id: pid } })).json.id as string;
+    const cgm = (await call("POST", "/v1/devices", { body: { name: "CGM", type: "cgm", patient_id: pid } })).json.id as string;
+    await env.DB.prepare(
+      "INSERT INTO alert_rules (id,device_id,name,metric,op,threshold,duration_s,cooldown_s,severity,action,enabled,created_at) VALUES (?,?,?,?,?,?,0,1800,?,?,1,?)",
+    ).bind("rul_auto_" + cgm, cgm, "Hipo", "glucose", "lt", 3.9, "critical", JSON.stringify({ vibrate: true }), Date.now()).run();
+    await env.DB.prepare("INSERT INTO glucose (device_id,ts,mmol,warning) VALUES (?,?,?,?)").bind(cgm, Date.now(), 3.1, "low").run();
+
+    expect(await evaluateGlucoseAlerts(env, cgm)).toBe(1);
+    const cmd = await env.DB.prepare("SELECT COUNT(*) AS n FROM commands WHERE device_id=? AND type='vibrate'").bind(band).first<{ n: number }>();
+    expect(cmd!.n).toBe(1);
   });
 
   it("glucose agrega por bucket", async () => {

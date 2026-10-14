@@ -657,7 +657,7 @@ const REC_STREAMS = {
   "heart-rate": { label: "Frequência cardíaca", dev: "band", cols: ["Quando", "FC (bpm)"], row: (r) => [fmt(r.ts), r.bpm], paged: true },
   steps: { label: "Passos", dev: "band", cols: ["Quando", "Passos", "Metros", "Calorias"], row: (r) => [fmt(r.ts), Number(r.steps).toLocaleString("pt-BR"), r.meters ?? "—", r.calories ?? "—"], paged: true },
   battery: { label: "Bateria", dev: "band", cols: ["Quando", "Nível (%)", "Carregando"], row: (r) => [fmt(r.ts), r.level, r.charging ? "sim" : "não"], paged: true },
-  events: { label: "Eventos", dev: "band", cols: ["Quando", "Tipo", "Detalhes"], row: (r) => [fmt(r.ts), eventTypeLabel(r.type), eventDetails(r.data)], paged: false, filter: (r) => !isBatteryEvent(r.type) },
+  events: { label: "Eventos", dev: "band", cols: ["Quando", "Tipo", "Detalhes"], row: (r) => [fmt(r.ts), eventTypeLabel(r.type), eventDetails(r.data)], paged: true, filter: (r) => !isBatteryEvent(r.type) },
 };
 let recBand = null, recCgm = null, recStream = "", recCursorTo = null, recAll = [], recReq = 0;
 
