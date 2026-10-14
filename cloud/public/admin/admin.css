@@ -108,6 +108,8 @@
   .device-cell { display: flex; align-items: center; gap: 8px; }
   .pulse-icon { display: block; object-fit: contain; width: 32px; height: 44px; flex: none; }
   .device-heading .pulse-icon { width: 46px; height: 68px; }
+  .cgm-icon { display: block; object-fit: contain; width: 40px; height: 40px; flex: none; }
+  .device-heading .cgm-icon { width: 58px; height: 58px; }
   .device-id, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
   .device-id { background: none; border: 0; padding: 0; cursor: pointer; color: var(--text); text-align: left; }
   .device-cell small { display: block; color: var(--text-2); font-size: 10px; margin-top: 3px; white-space: nowrap; }

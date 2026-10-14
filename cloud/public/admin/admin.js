@@ -150,6 +150,11 @@ let installsRequest = 0;
 let loadedFilter = { status: "", q: "" };
 
 const pulseIcon = () => el("img", { class: "pulse-icon", src: "/admin/assets/biosense-pulse.png", alt: "", width: "32", height: "44" });
+// Ícone e nome do modelo conforme o tipo do dispositivo (pulseira × sensor de glicemia).
+const deviceModel = (d) => d.type === "cgm" ? "Sensor AiDEX" : "BIOSENSE Pulse";
+const deviceIcon = (d) => d.type === "cgm"
+  ? el("img", { class: "cgm-icon", src: "/admin/assets/cgm-sensor.png", alt: "", width: "40", height: "40" })
+  : pulseIcon();
 const shortId = (id) => id.length > 12 ? `…${id.slice(-8)}` : id;
 const onlineState = (d) => el("span", {}, el("span", { class: `dot ${d.online ? "on" : ""}`, "aria-hidden": "true" }), d.online ? "Online" : "Offline");
 const detailRow = (label, value) => el("div", {}, el("dt", {}, label), el("dd", {}, value));
@@ -165,7 +170,7 @@ function renderDetail() {
   const config = d.config || {};
   box.replaceChildren(
     el("p", { class: "eyebrow" }, "Instalação selecionada"),
-    el("div", { class: "device-heading" }, pulseIcon(), el("div", {}, el("h2", {}, "BIOSENSE Pulse"), el("div", { class: "mono detail-id", title: d.id }, d.id))),
+    el("div", { class: "device-heading" }, deviceIcon(d), el("div", {}, el("h2", {}, deviceModel(d)), el("div", { class: "mono detail-id", title: d.id }, d.id))),
     el("dl", { class: "detail-group" },
       detailRow("Participante", el("span", { class: "mono" }, d.patient_ref || "Não vinculado")),
       detailRow("Situação", el("span", { class: `status-text ${d.status}` }, statusLabel[d.status] || d.status)),
@@ -196,9 +201,9 @@ function renderInstalls() {
       renderDetail();
     };
     return el("tr", { class: d.id === selectedDeviceId ? "selected" : "", "data-id": d.id, onclick: select },
-      el("td", {}, el("div", { class: "device-cell" }, pulseIcon(), el("div", {},
-        el("button", { class: "device-id", "data-id": d.id, title: d.id, "aria-pressed": String(d.id === selectedDeviceId), "aria-label": `Selecionar BIOSENSE Pulse ${d.id}`, "aria-controls": "deviceDetail" }, shortId(d.id)),
-        el("small", {}, "BIOSENSE Pulse")))),
+      el("td", {}, el("div", { class: "device-cell" }, deviceIcon(d), el("div", {},
+        el("button", { class: "device-id", "data-id": d.id, title: d.id, "aria-pressed": String(d.id === selectedDeviceId), "aria-label": `Selecionar ${deviceModel(d)} ${d.id}`, "aria-controls": "deviceDetail" }, shortId(d.id)),
+        el("small", {}, deviceModel(d))))),
       el("td", { class: "mono" }, d.patient_ref || el("span", { class: "muted" }, "Não vinculado")),
       el("td", {}, el("span", { class: `status-text ${d.status}` }, statusLabel[d.status] || d.status)),
       el("td", {}, onlineState(d), el("div", { class: "muted last-contact" }, `Visto ${fmt(d.last_seen_at)}`)),
