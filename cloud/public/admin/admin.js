@@ -29,6 +29,19 @@ function eventDetails(data) {
 }
 const EVENT_LABELS = { FELL_ASLEEP: "Adormeceu", WOKE_UP: "Acordou", DEEP_SLEEP: "Sono profundo", LIGHT_SLEEP: "Sono leve", AWAKE: "Acordado", STEP_GOAL: "Meta de passos", LOW_BATTERY: "Bateria baixa", CHARGING: "Carregando", FULLY_CHARGED: "Carga completa" };
 function eventTypeLabel(t) { return EVENT_LABELS[t] || String(t).replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
+// Janela de recência para o ponto verde de "leitura recente".
+const ONLINE_FRESH_MS = 5 * 60_000;
+// Eventos de bateria/carga são ruído na linha do tempo clínica.
+const isBatteryEvent = (type) => /batter|charg|carga|bateria/i.test(String(type || ""));
+// Tempo relativo ("há 12 min"), mais honesto que um "conectado" que pode estar velho.
+function ago(ts) {
+  if (!ts) return "sem leituras";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "agora há pouco";
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
+  return `há ${Math.floor(s / 86400)} d`;
+}
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -96,11 +109,10 @@ async function start() {
     if (!canRead) return logout("Esta credencial não tem permissão de leitura.");
     $("#who").textContent = me.id === "admin" ? "Gestão" : me.id.startsWith("tech:") ? (sessionStorage.getItem(TECH_NAME) || "Técnico") : canManage ? "Gestão" : "Leitura";
     $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
-    // Sem gestão (seguidor/técnico só-leitura): Voluntários (consolidado) + Monitoramento
-    // (detalhe por dispositivo), ambos já escopados aos devices da conta.
-    const readerTabs = ["patients", "monitor"];
+    // Sem gestão (seguidor/técnico só-leitura): só a aba Voluntários, que já traz o
+    // consolidado + a lista de registros completos. Monitoramento é a visão de estudo da gestão.
     document.querySelectorAll("nav [data-tab]").forEach((button) => {
-      button.classList.toggle("hidden", !canManage && !readerTabs.includes(button.dataset.tab));
+      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "patients");
     });
     if (canManage) {
       document.querySelector('[data-tab="installs"]').click();
@@ -523,11 +535,12 @@ async function loadMonitorData() {
     $("#sleepRows").replaceChildren(...(sleep.data || []).slice().reverse().map((row) => el("tr", {},
       el("td", {}, fmt(row.start)), el("td", {}, durationLabel(row.duration_min)), el("td", {}, `${row.deep_min} min`), el("td", {}, `${row.light_min} min`), el("td", {}, row.avg_hr == null ? "—" : `${row.avg_hr} bpm`))));
     $("#sleepEmpty").classList.toggle("hidden", Boolean(sleep.count));
-    $("#eventRows").replaceChildren(...(events.data || []).map((row) => {
+    const shownEvents = (events.data || []).filter((row) => !isBatteryEvent(row.type));
+    $("#eventRows").replaceChildren(...shownEvents.map((row) => {
       const details = eventDetails(row.data);
       return el("tr", {}, el("td", {}, fmt(row.ts)), el("td", {}, eventTypeLabel(row.type)), el("td", {}, details.length > 120 ? `${details.slice(0, 120)}…` : details));
     }));
-    $("#eventsEmpty").classList.toggle("hidden", Boolean(events.count));
+    $("#eventsEmpty").classList.toggle("hidden", shownEvents.length > 0);
     $("#monitorUpdatedAt").textContent = `Atualizado às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
   } catch (e) {
     if (request === monitorRequest && e.message !== "unauthorized") {
@@ -638,6 +651,60 @@ const TIR_BANDS = [
 ];
 const gluEventType = { diet: "Refeição", exercise: "Exercício", medication: "Medicação", insulin: "Insulina", other: "Outro" };
 
+// Lista de registros completos (dados brutos) por fluxo. dev: 'cgm' ou 'band'.
+const REC_STREAMS = {
+  glucose: { label: "Glicemia", dev: "cgm", cols: ["Quando", "Glicose (mmol/L)", "Aviso"], row: (r) => [fmt(r.ts), String(r.mmol).replace(".", ","), r.warning || "—"], paged: true },
+  "heart-rate": { label: "Frequência cardíaca", dev: "band", cols: ["Quando", "FC (bpm)"], row: (r) => [fmt(r.ts), r.bpm], paged: true },
+  steps: { label: "Passos", dev: "band", cols: ["Quando", "Passos", "Metros", "Calorias"], row: (r) => [fmt(r.ts), Number(r.steps).toLocaleString("pt-BR"), r.meters ?? "—", r.calories ?? "—"], paged: true },
+  battery: { label: "Bateria", dev: "band", cols: ["Quando", "Nível (%)", "Carregando"], row: (r) => [fmt(r.ts), r.level, r.charging ? "sim" : "não"], paged: true },
+  events: { label: "Eventos", dev: "band", cols: ["Quando", "Tipo", "Detalhes"], row: (r) => [fmt(r.ts), eventTypeLabel(r.type), eventDetails(r.data)], paged: false, filter: (r) => !isBatteryEvent(r.type) },
+};
+let recBand = null, recCgm = null, recStream = "", recCursorTo = null, recAll = [], recReq = 0;
+
+function setupRecords(band, cgm) {
+  recBand = band; recCgm = cgm;
+  const avail = Object.entries(REC_STREAMS).filter(([, s]) => (s.dev === "cgm" ? cgm : band));
+  const sel = $("#recStream");
+  sel.replaceChildren(...avail.map(([k, s]) => el("option", { value: k }, s.label)));
+  if (!avail.length) {
+    recStream = ""; $("#recHead").replaceChildren(); $("#recRows").replaceChildren(); $("#recMore").classList.add("hidden");
+    $("#recCount").textContent = ""; $("#recEmpty").textContent = "Sem dispositivos para listar."; $("#recEmpty").classList.remove("hidden");
+    return;
+  }
+  if (!avail.some(([k]) => k === recStream)) recStream = avail[0][0];
+  sel.value = recStream;
+  loadRecords(true);
+}
+
+async function loadRecords(reset) {
+  const cfg = REC_STREAMS[recStream];
+  const dev = cfg && (cfg.dev === "cgm" ? recCgm : recBand);
+  if (!cfg || !dev) return;
+  const req = ++recReq;
+  const windowFrom = Date.now() - Number($("#patRange").value);
+  if (reset) { recAll = []; recCursorTo = null; }
+  $("#recMore").disabled = true;
+  try {
+    const q = new URLSearchParams({ from: String(windowFrom), to: String(recCursorTo ?? Date.now()), limit: "200", order: "desc" });
+    const res = await api("GET", `/v1/devices/${encodeURIComponent(dev.id)}/${recStream}?${q}`);
+    if (req !== recReq || !apiKey) return;
+    let data = res.data || [];
+    if (cfg.filter) data = data.filter(cfg.filter);
+    recAll.push(...data);
+    $("#recHead").replaceChildren(el("tr", {}, ...cfg.cols.map((c) => el("th", {}, c))));
+    $("#recRows").replaceChildren(...recAll.map((r) => el("tr", {}, ...cfg.row(r).map((v) => el("td", {}, v == null ? "—" : String(v))))));
+    $("#recEmpty").textContent = "Sem registros no período.";
+    $("#recEmpty").classList.toggle("hidden", recAll.length > 0);
+    $("#recCount").textContent = `${recAll.length} registro(s)`;
+    recCursorTo = cfg.paged && res.next && res.next.to != null ? res.next.to : null;
+    $("#recMore").classList.toggle("hidden", recCursorTo == null);
+  } catch (e) {
+    if (e.message !== "unauthorized") flash(e.message, "error");
+  } finally {
+    $("#recMore").disabled = false;
+  }
+}
+
 function setPatientEmpty(msg) {
   ["gluChart", "patHrChart", "patStepsChart"].forEach((id) => $("#" + id).replaceChildren(el("div", { class: "chart-empty" }, msg || "Sem dados.")));
   ["kGluNow", "kTir", "kGmi", "kHr", "kSteps", "kSleep", "kAlerts"].forEach((id) => $("#" + id).textContent = "—");
@@ -645,6 +712,8 @@ function setPatientEmpty(msg) {
   $("#tirBar").replaceChildren(); $("#tirLegend").replaceChildren();
   $("#gluEventRows").replaceChildren(); $("#gluEventsEmpty").classList.remove("hidden");
   $("#aidexStatus").textContent = "—"; $("#aidexActions").replaceChildren();
+  $("#recHead").replaceChildren(); $("#recRows").replaceChildren(); $("#recMore").classList.add("hidden");
+  $("#recCount").textContent = ""; $("#recEmpty").textContent = msg || "Sem registros."; $("#recEmpty").classList.remove("hidden");
 }
 
 async function loadPatients() {
@@ -673,9 +742,16 @@ async function loadPatients() {
 function renderPatientHeader(detail, band, cgm) {
   const chip = (label, on) => el("span", { class: `dev-chip ${on ? "on" : "off"}` }, el("span", { class: "dot " + (on ? "on" : ""), "aria-hidden": "true" }), label);
   const chips = [];
-  if (band) chips.push(chip(`Pulseira ${band.online ? "online" : "offline"}`, band.online));
-  if (cgm) chips.push(chip("Sensor AiDEX", true));
-  if (!chips.length) chips.push(el("span", { class: "muted" }, "Sem dispositivos vinculados."));
+  if (band) {
+    // Não afirmamos "conectado" (o socket pode ficar zumbi): mostramos a última leitura.
+    const recent = band.last_seen_at && (Date.now() - band.last_seen_at < ONLINE_FRESH_MS);
+    chips.push(el("span", { class: `dev-chip ${recent ? "on" : "off"}` },
+      el("span", { class: "dot " + (recent ? "on" : ""), "aria-hidden": "true" }),
+      `Pulseira · última leitura ${ago(band.last_seen_at)}`));
+  }
+  // O sensor AiDEX é coletado por nuvem (não é "conexão ao vivo"): status real fica no bloco abaixo.
+  if (cgm) chips.push(chip("Sensor AiDEX", false));
+  if (!band && !cgm) chips.push(el("span", { class: "muted" }, "Sem dispositivos vinculados."));
   $("#patHeader").replaceChildren(
     el("div", { class: "patient-id" }, el("h2", {}, detail.name), detail.ref ? el("span", { class: "mono" }, detail.ref) : null),
     el("div", { class: "dev-chips" }, ...chips),
@@ -827,6 +903,8 @@ async function loadPatientData() {
     }
     if (!band && !cgm) exp.replaceChildren(el("span", { class: "muted" }, "Sem dispositivos."));
 
+    setupRecords(band, cgm);
+
     $("#kGluNow").textContent = patient.last_glucose != null ? mmolLabel(patient.last_glucose) : "—";
     $("#kGluNowAt").textContent = patient.last_glucose_ts ? dateLabel(patient.last_glucose_ts) : "sem leituras";
     $("#kAlerts").textContent = patient.unacked_alerts != null ? patient.unacked_alerts : "0";
@@ -876,6 +954,8 @@ async function loadPatientData() {
   }
 }
 
+$("#recStream").addEventListener("change", (e) => { recStream = e.target.value; loadRecords(true); });
+$("#recMore").addEventListener("click", () => loadRecords(false));
 $("#patReload").addEventListener("click", guard(loadPatientData));
 $("#patSelect").addEventListener("change", (e) => { selectedPatientId = e.target.value; guard(loadPatientData)(); });
 $("#patRange").addEventListener("change", guard(loadPatientData));

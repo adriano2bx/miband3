@@ -196,7 +196,16 @@
           <p class="muted">A coleta é automática a cada 15 min após o voluntário autorizar.</p>
         </section>
       </div>
-      <p class="monitor-footnote">Faixas de glicose (mmol/L): &lt;3,0 muito baixa · 3,0–3,9 baixa · 3,9–10,0 no alvo · 10,0–13,9 alta · &gt;13,9 muito alta.</p>
+      <section class="monitor-table-panel" style="margin-top:14px" aria-labelledby="recTitle">
+        <div class="monitor-section-head">
+          <div><p class="eyebrow">Histórico completo</p><h2 id="recTitle">Lista de registros</h2></div>
+          <select id="recStream" style="max-width:240px;min-height:40px"></select>
+        </div>
+        <div class="table-wrap"><table><thead id="recHead"></thead><tbody id="recRows"></tbody></table></div>
+        <p class="muted" id="recEmpty">Selecione um voluntário para listar os registros.</p>
+        <div class="registry-pagination"><span id="recCount" role="status"></span><button id="recMore" class="link hidden">Carregar mais</button></div>
+      </section>
+      <p class="monitor-footnote">Faixas de glicose (mmol/L): &lt;3,0 muito baixa · 3,0–3,9 baixa · 3,9–10,0 no alvo · 10,0–13,9 alta · &gt;13,9 muito alta. A lista de registros mostra os dados brutos recebidos.</p>
     </section>
 
     <!-- Termo -->
