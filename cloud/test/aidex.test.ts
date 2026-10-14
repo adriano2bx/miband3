@@ -98,6 +98,25 @@ describe("aidex — rotas", () => {
     expect(sum.json.tir.in_range).toBe(50); // 5.5 e 7.0 dentro de 3.9–10.0
   });
 
+  it("purge remove também glicemia e vínculo AiDEX", async () => {
+    const d = await newDevice("Purge CGM");
+    const now = Date.now();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO aidex_links (device_id, env, status, state, created_at, updated_at) VALUES (?, 'sandbox', 'pending', 'st_x', ?, ?)").bind(d.id, now, now),
+      env.DB.prepare("INSERT INTO glucose (device_id, ts, mmol, warning) VALUES (?, ?, ?, ?)").bind(d.id, now, 5.5, null),
+      env.DB.prepare("INSERT INTO glucose_events (device_id, type, ext_id, ts, payload) VALUES (?, 'diet', 'e1', ?, '{}')").bind(d.id, now),
+    ]);
+
+    const del = await call("DELETE", `/v1/devices/${d.id}?purge=true`);
+    expect(del.status).toBe(200);
+    expect(del.json.purged).toBe(true);
+
+    for (const t of ["aidex_links", "glucose", "glucose_events"]) {
+      const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE device_id = ?`).bind(d.id).first<{ n: number }>();
+      expect(row!.n).toBe(0);
+    }
+  });
+
   it("glucose agrega por bucket", async () => {
     const d = await newDevice("Glicemia D");
     const base = Date.now() - 3600_000;

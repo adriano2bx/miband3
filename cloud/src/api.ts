@@ -270,7 +270,7 @@ api.delete("/v1/devices/:id", deviceRoute("manage"), async (c) => {
     if (!c.get("principal").scopes.has("admin")) return c.json({ error: "forbidden", message: "purge exige o escopo 'admin'." }, 403);
     const db = c.env.DB;
     await db.batch(
-      ["heart_rate", "steps", "battery", "events", "activity", "commands", "alerts"].map((t) => db.prepare(`DELETE FROM ${t} WHERE device_id = ?`).bind(id))
+      ["heart_rate", "steps", "battery", "events", "activity", "commands", "alerts", "glucose", "glucose_events", "aidex_links"].map((t) => db.prepare(`DELETE FROM ${t} WHERE device_id = ?`).bind(id))
         .concat(db.prepare("DELETE FROM alert_rules WHERE device_id = ?").bind(id), db.prepare("DELETE FROM devices WHERE id = ?").bind(id)),
     );
     return c.json({ deleted: id, purged: true });
