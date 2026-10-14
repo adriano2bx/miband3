@@ -46,7 +46,7 @@ const routes: Record<string, Record<string, Op>> = {
     post: { summary: "Criar seguidor (acesso só-leitura ao paciente)", description: "Entra no painel pelo login de técnico (credencial + senha) e só enxerga os devices deste paciente.", tag: "Pacientes", auth: "manage", body: "FollowerInput", res: "FollowerCreated", status: 201 },
   },
   "/v1/patients/{pid}/followers/{tid}": {
-    delete: { summary: "Remover seguidor", tag: "Pacientes", auth: "manage", res: "Disabled" },
+    delete: { summary: "Remover o seguidor deste paciente", description: "Desatrela este paciente; se a conta não tiver mais nenhum paciente, é desativada.", tag: "Pacientes", auth: "manage", res: "FollowerRemoved" },
   },
 
   // ------------------------------------------------------------------ tempo real
@@ -150,6 +150,12 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/technicians/{tid}": {
     patch: { summary: "Alterar nome, senha (encerra sessões), escopos ou desbloquear", tag: "Acesso técnico", auth: "admin", body: "TechnicianPatch", res: "Updated" },
     delete: { summary: "Desativar técnico e encerrar sessões", tag: "Acesso técnico", auth: "admin", res: "Disabled" },
+  },
+  "/v1/technicians/{tid}/patients": {
+    post: { summary: "Atrelar um voluntário (paciente) ao técnico responsável", description: "O técnico passa a enxergar os devices deste paciente. Pode ter vários.", tag: "Acesso técnico", auth: "admin", body: "AttachPatient", res: "PatientAttached", status: 201 },
+  },
+  "/v1/technicians/{tid}/patients/{pid}": {
+    delete: { summary: "Desatrelar um voluntário do técnico", tag: "Acesso técnico", auth: "admin", res: "PatientDetached" },
   },
   "/v1/tech/login": { post: { summary: "Login técnico (usado pelo app)", description: "Sessão `mbt_…` presa à instalação do celular: 10 min sem uso, 8 h no máximo. 5 senhas erradas bloqueiam a credencial por 15 min (HTTP 429).", tag: "Acesso técnico", auth: "public", body: "TechLogin", res: "TechSession", status: 201 } },
   "/v1/panel/login": { post: { summary: "Login individual de técnico no painel (somente leitura)", description: "Exige o escopo `panel_read` concedido pela gestão. Sessão `mbp_…`: 10 min sem uso, 8 h no máximo.", tag: "Acesso técnico", auth: "public", body: "PanelLogin", res: "PanelSession", status: 201 } },
@@ -315,7 +321,7 @@ const schemas: Record<string, unknown> = {
   PatientInput: obj({ name: { type: "string", example: "Paula" }, ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
   Archived: obj({ archived: T.str }),
   FollowerInput: obj({ name: { type: "string", example: "Maria (mãe)" }, credential: { type: "string", example: "maria.paula" }, password: { type: "string", minLength: 8 } }, ["name", "credential", "password"]),
-  Follower: obj({ id: T.str, credential: T.str, name: T.str, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  Follower: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
   FollowerCreated: obj({ id: T.str, credential: T.str, name: T.str, patient_id: T.str, role: { type: "string", example: "follower" } }),
   Installation: installation,
   InstallationWithToken: { allOf: [ref("Installation"), obj({ device_token: { type: "string", example: "mbd_…" } })] },
@@ -362,7 +368,11 @@ const schemas: Record<string, unknown> = {
   ConsentDecision: obj({ version: T.str, accepted: T.bool, client: T.obj }, ["version", "accepted"]),
   TechnicianInput: obj({ credential: { type: "string", example: "ana.souza" }, name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision", "panel_read"] }, default: ["tech"] } }, ["credential", "name", "password"]),
   TechnicianPatch: obj({ name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision", "panel_read"] } }, unlock: T.bool }),
-  Technician: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  Technician: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, patient_ids: { type: "array", items: T.str, description: "Voluntários atrelados (vazio = conta ampla)." }, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  AttachPatient: obj({ patient_id: { type: "string", example: "pat_1a2b3c" } }, ["patient_id"]),
+  PatientAttached: obj({ technician: T.str, patient_id: T.str, attached: T.bool }),
+  PatientDetached: obj({ technician: T.str, removed: T.str }),
+  FollowerRemoved: obj({ removed: T.str, technician: T.str, disabled: T.bool }),
   TechLogin: obj({ credential: T.str, password: T.str, device_token: { type: "string", description: "Token da instalação do celular." } }, ["credential", "password"]),
   TechSession: obj({ session_token: { type: "string", example: "mbt_…" }, expires_at: T.ts, idle_timeout_s: T.int, technician: obj({ name: T.str }), scopes: { type: "array", items: T.str } }),
   PanelLogin: obj({ credential: T.str, password: T.str }, ["credential", "password"]),

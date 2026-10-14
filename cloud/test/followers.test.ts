@@ -46,4 +46,27 @@ describe("seguidores (acesso por paciente)", () => {
     const cantCreate = await call("POST", `/v1/patients/${b}/followers`, { token, body: { name: "x", credential: "y.z", password: "senhaforte1" } });
     expect(cantCreate.status).toBe(403);
   });
+
+  it("técnico responsável enxerga vários voluntários atrelados", async () => {
+    const p1 = (await call("POST", "/v1/patients", { body: { name: "Voluntário 1" } })).json.id as string;
+    const p2 = (await call("POST", "/v1/patients", { body: { name: "Voluntário 2" } })).json.id as string;
+    const p3 = (await call("POST", "/v1/patients", { body: { name: "Voluntário 3 (fora)" } })).json.id as string;
+    const d1 = (await call("POST", "/v1/devices", { body: { name: "D1", patient_id: p1 } })).json.id as string;
+    const d2 = (await call("POST", "/v1/devices", { body: { name: "D2", patient_id: p2 } })).json.id as string;
+    await call("POST", "/v1/devices", { body: { name: "D3", patient_id: p3 } });
+
+    // Cria o técnico responsável (panel_read) e atrela 2 voluntários.
+    const tech = await call("POST", "/v1/technicians", { body: { credential: "tec.resp", name: "Téc. Responsável", password: "senhaforte1", scopes: ["panel_read"] } });
+    expect(tech.status).toBe(201);
+    const tid = tech.json.id as string;
+    expect((await call("POST", `/v1/technicians/${tid}/patients`, { body: { patient_id: p1 } })).status).toBe(201);
+    expect((await call("POST", `/v1/technicians/${tid}/patients`, { body: { patient_id: p2 } })).status).toBe(201);
+
+    const token = await panelLogin("tec.resp", "senhaforte1");
+    const me = await call("GET", "/v1/me", { token });
+    expect([...me.json.device_ids].sort()).toEqual([d1, d2].sort());
+    // Não vê o voluntário de fora.
+    const patients = await call("GET", "/v1/patients", { token });
+    expect(patients.json.data.map((p: any) => p.id).sort()).toEqual([p1, p2].sort());
+  });
 });
