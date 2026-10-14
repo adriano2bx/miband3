@@ -49,6 +49,7 @@
 
 <section id="app" class="hidden">
   <nav aria-label="Seções administrativas">
+    <button data-tab="patients">Pacientes</button>
     <button data-tab="installs" aria-current="page">Instalações</button>
     <button data-tab="monitor">Monitoramento</button>
     <button data-tab="terms">Termos de participação</button>
@@ -134,6 +135,59 @@
         </section>
       </div>
       <p class="monitor-footnote">As séries mostram somente os dados recebidos e armazenados pela nuvem; períodos sem amostras permanecem vazios.</p>
+    </section>
+
+    <!-- Pacientes (visão consolidada: pulseira + glicemia) -->
+    <section data-panel="patients" class="hidden" aria-labelledby="patientsTitle">
+      <div class="page-heading monitor-heading">
+        <div><p class="eyebrow">Acompanhamento / Visão por pessoa</p>
+          <h1 id="patientsTitle">Pacientes</h1>
+          <p class="sub">Pulseira BIOSENSE Pulse e sensor de glicemia AiDEX consolidados por paciente.</p></div>
+        <div class="refresh-control"><span id="patUpdatedAt" class="muted" role="status">Selecione um paciente</span>
+          <button class="btn secondary" id="patReload">Atualizar <span aria-hidden="true">↻</span></button></div>
+      </div>
+      <div class="monitor-filters">
+        <div><label for="patSelect">Paciente</label><select id="patSelect"></select></div>
+        <div><label for="patRange">Período</label><select id="patRange">
+          <option value="86400000">Últimas 24 horas</option>
+          <option value="604800000">Últimos 7 dias</option>
+          <option value="1209600000" selected>Últimos 14 dias</option>
+          <option value="2592000000">Últimos 30 dias</option></select></div>
+      </div>
+      <div id="patNotice" class="notice hidden" role="status"></div>
+      <div id="patHeader" class="patient-header"></div>
+      <dl class="monitor-kpis" aria-label="Resumo do paciente">
+        <div><dt>Glicemia atual</dt><dd id="kGluNow">—</dd><small id="kGluNowAt">sem leituras</small></div>
+        <div><dt>No alvo (TIR)</dt><dd id="kTir">—</dd><small id="kTirRange">3,9–10,0 mmol/L</small></div>
+        <div><dt>GMI</dt><dd id="kGmi">—</dd><small id="kGluMean">glicose média —</small></div>
+        <div><dt>FC média</dt><dd id="kHr">—</dd><small id="kHrRange">sem amostras</small></div>
+        <div><dt>Alertas</dt><dd id="kAlerts">—</dd><small>não reconhecidos</small></div>
+      </dl>
+      <div class="monitor-grid">
+        <section class="monitor-chart" aria-labelledby="gluChartTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Glicemia (CGM AiDEX)</p><h2 id="gluChartTitle">Curva de glicose</h2></div><span class="chart-unit">mmol/L</span></div>
+          <div class="chart" id="gluChart" role="img" aria-label="Gráfico de glicose"></div>
+          <div class="tir-bar" id="tirBar" aria-hidden="true"></div>
+          <div class="tir-legend" id="tirLegend"></div>
+        </section>
+        <section class="monitor-chart" aria-labelledby="patHrChartTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Pulseira BIOSENSE Pulse</p><h2 id="patHrChartTitle">Frequência cardíaca</h2></div><span class="chart-unit">bpm</span></div>
+          <div class="chart" id="patHrChart" role="img" aria-label="Gráfico de frequência cardíaca"></div>
+        </section>
+        <section class="monitor-table-panel">
+          <div class="monitor-section-head"><div><p class="eyebrow">Linha do tempo</p><h2>Eventos de glicemia</h2></div></div>
+          <p class="muted">Refeições, insulina, exercício e medicação registrados na AiDEX.</p>
+          <div class="table-wrap"><table><thead><tr><th>Quando</th><th>Tipo</th><th>Detalhes</th></tr></thead><tbody id="gluEventRows"></tbody></table></div>
+          <p class="muted" id="gluEventsEmpty">Sem eventos no período.</p>
+        </section>
+        <section class="monitor-table-panel" id="aidexPanel">
+          <div class="monitor-section-head"><div><p class="eyebrow">Integração</p><h2>Sensor AiDEX</h2></div></div>
+          <div id="aidexStatus" class="muted">—</div>
+          <div class="actions" id="aidexActions" style="margin-top:12px"></div>
+          <p class="muted">A coleta é automática a cada 15 min após o paciente autorizar.</p>
+        </section>
+      </div>
+      <p class="monitor-footnote">Faixas de glicose (mmol/L): &lt;3,0 muito baixa · 3,0–3,9 baixa · 3,9–10,0 no alvo · 10,0–13,9 alta · &gt;13,9 muito alta.</p>
     </section>
 
     <!-- Termo -->

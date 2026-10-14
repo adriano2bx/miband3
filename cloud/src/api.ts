@@ -378,10 +378,32 @@ api.get("/v1/patients", requireAuth("read"), async (c) => {
     args.push(...visible);
   }
   const { results } = await c.env.DB.prepare(
-    `SELECT p.*, (SELECT COUNT(*) FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL) AS device_count
+    `SELECT p.*,
+       (SELECT COUNT(*) FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL) AS device_count,
+       (SELECT COUNT(*) FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL AND d.online = 1) AS online_count,
+       EXISTS(SELECT 1 FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL AND d.type = 'miband') AS has_band,
+       EXISTS(SELECT 1 FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL AND d.type = 'cgm') AS has_cgm,
+       (SELECT hr.bpm FROM heart_rate hr JOIN devices d ON d.id = hr.device_id WHERE d.patient_id = p.id ORDER BY hr.ts DESC LIMIT 1) AS last_hr,
+       (SELECT hr.ts  FROM heart_rate hr JOIN devices d ON d.id = hr.device_id WHERE d.patient_id = p.id ORDER BY hr.ts DESC LIMIT 1) AS last_hr_ts,
+       (SELECT g.mmol FROM glucose g JOIN devices d ON d.id = g.device_id WHERE d.patient_id = p.id ORDER BY g.ts DESC LIMIT 1) AS last_glucose,
+       (SELECT g.ts   FROM glucose g JOIN devices d ON d.id = g.device_id WHERE d.patient_id = p.id ORDER BY g.ts DESC LIMIT 1) AS last_glucose_ts,
+       (SELECT COUNT(*) FROM alerts a JOIN devices d ON d.id = a.device_id WHERE d.patient_id = p.id AND a.acked_at IS NULL) AS unacked_alerts
      FROM patients p ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY p.name LIMIT 1000`,
-  ).bind(...args).all<PatientRow & { device_count: number }>();
-  return c.json({ data: results.map((p) => serializePatient(p, { device_count: p.device_count })), count: results.length });
+  ).bind(...args).all<PatientRow & Record<string, number | null>>();
+  return c.json({
+    data: results.map((p) => serializePatient(p, {
+      device_count: p.device_count,
+      online_count: p.online_count,
+      has_band: Boolean(p.has_band),
+      has_cgm: Boolean(p.has_cgm),
+      last_hr: p.last_hr,
+      last_hr_ts: p.last_hr_ts,
+      last_glucose: p.last_glucose,
+      last_glucose_ts: p.last_glucose_ts,
+      unacked_alerts: p.unacked_alerts,
+    })),
+    count: results.length,
+  });
 });
 
 api.get("/v1/patients/:pid", requireAuth("read"), async (c) => {

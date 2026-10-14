@@ -5,6 +5,7 @@ const KEY = "biosense.admin.key";
 const TECH_NAME = "biosense.admin.technician";
 let apiKey = sessionStorage.getItem(KEY) || "";
 let devices = [];
+let isManager = false;
 
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
@@ -79,17 +80,19 @@ async function start() {
   try {
     const me = await api("GET", "/v1/me");
     const canManage = me.scopes.includes("manage") || me.scopes.includes("admin");
+    isManager = canManage;
     const canRead = me.scopes.includes("read") || me.scopes.includes("admin");
     if (!canRead) return logout("Esta credencial não tem permissão de leitura.");
     $("#who").textContent = me.id === "admin" ? "Gestão" : me.id.startsWith("tech:") ? (sessionStorage.getItem(TECH_NAME) || "Técnico") : canManage ? "Gestão" : "Leitura";
     $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
+    // Sem gestão (seguidor/técnico só-leitura): vê a visão consolidada de Pacientes.
     document.querySelectorAll("nav [data-tab]").forEach((button) => {
-      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "monitor");
+      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "patients");
     });
     if (canManage) {
       document.querySelector('[data-tab="installs"]').click();
     } else {
-      document.querySelector('[data-tab="monitor"]').click();
+      document.querySelector('[data-tab="patients"]').click();
     }
   } catch (e) { if (e.message !== "unauthorized") logout(e.message); }
 }
@@ -138,7 +141,7 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   document.querySelectorAll("nav button").forEach((x) => { if (x === b) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
   document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
   $("#flash").replaceChildren();
-  ({ installs: loadInstalls, monitor: loadMonitorDevices, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
+  ({ installs: loadInstalls, monitor: loadMonitorDevices, patients: loadPatients, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------------ instalações
@@ -610,6 +613,197 @@ const loadAlerts = guard(async () => {
   )));
   $("#alertsEmpty").textContent = data.length ? "" : "Nenhum alerta pendente.";
 });
+
+// ------------------------------------------------------------------ pacientes (visão consolidada)
+let patients = [];
+let selectedPatientId = "";
+let patRequest = 0;
+const NS = "http://www.w3.org/2000/svg";
+const mmolLabel = (v) => (v == null ? "—" : `${Number(v).toFixed(1).replace(".", ",")} mmol/L`);
+const TIR_BANDS = [
+  ["very_low", "Muito baixa", "#8a1c1c"],
+  ["low", "Baixa", "#d64545"],
+  ["in_range", "No alvo", "#2f9e6f"],
+  ["high", "Alta", "#e0a100"],
+  ["very_high", "Muito alta", "#b25f00"],
+];
+const gluEventType = { diet: "Refeição", exercise: "Exercício", medication: "Medicação", insulin: "Insulina", other: "Outro" };
+
+function setPatientEmpty(msg) {
+  ["gluChart", "patHrChart"].forEach((id) => $("#" + id).replaceChildren(el("div", { class: "chart-empty" }, msg || "Sem dados.")));
+  ["kGluNow", "kTir", "kGmi", "kHr", "kAlerts"].forEach((id) => $("#" + id).textContent = "—");
+  $("#kGluNowAt").textContent = "sem leituras"; $("#kGluMean").textContent = "glicose média —"; $("#kHrRange").textContent = "sem amostras";
+  $("#tirBar").replaceChildren(); $("#tirLegend").replaceChildren();
+  $("#gluEventRows").replaceChildren(); $("#gluEventsEmpty").classList.remove("hidden");
+  $("#aidexStatus").textContent = "—"; $("#aidexActions").replaceChildren();
+}
+
+async function loadPatients() {
+  const select = $("#patSelect");
+  select.disabled = true;
+  try {
+    const { data } = await api("GET", "/v1/patients");
+    patients = data;
+    if (!data.length) {
+      select.replaceChildren();
+      selectedPatientId = "";
+      $("#patHeader").replaceChildren(el("p", { class: "muted" }, "Nenhum paciente cadastrado."));
+      $("#patUpdatedAt").textContent = "Sem pacientes";
+      return setPatientEmpty("Nenhum paciente cadastrado.");
+    }
+    select.replaceChildren(...data.map((p) => el("option", { value: p.id }, `${p.name}${p.ref ? " · " + p.ref : ""}`)));
+    if (!data.some((p) => p.id === selectedPatientId)) selectedPatientId = data[0].id;
+    select.value = selectedPatientId;
+    select.disabled = false;
+    await loadPatientData();
+  } catch (e) {
+    if (e.message !== "unauthorized") { const n = $("#patNotice"); n.className = "notice error"; n.classList.remove("hidden"); n.textContent = e.message; }
+  }
+}
+
+function renderPatientHeader(detail, band, cgm) {
+  const chip = (label, on) => el("span", { class: `dev-chip ${on ? "on" : "off"}` }, el("span", { class: "dot " + (on ? "on" : ""), "aria-hidden": "true" }), label);
+  const chips = [];
+  if (band) chips.push(chip(`Pulseira ${band.online ? "online" : "offline"}`, band.online));
+  if (cgm) chips.push(chip("Sensor AiDEX", true));
+  if (!chips.length) chips.push(el("span", { class: "muted" }, "Sem dispositivos vinculados."));
+  $("#patHeader").replaceChildren(
+    el("div", { class: "patient-id" }, el("h2", {}, detail.name), detail.ref ? el("span", { class: "mono" }, detail.ref) : null),
+    el("div", { class: "dev-chips" }, ...chips),
+  );
+}
+
+function renderTir(s) {
+  const bar = $("#tirBar"); const legend = $("#tirLegend");
+  if (!s || !s.samples) { bar.replaceChildren(); legend.replaceChildren(); return; }
+  bar.replaceChildren(...TIR_BANDS.map(([k, , color]) => el("span", { class: "tir-seg", style: `width:${s.tir[k] || 0}%;background:${color}`, title: `${s.tir[k] || 0}%` })));
+  legend.replaceChildren(...TIR_BANDS.map(([k, label, color]) =>
+    el("span", { class: "tir-key" }, el("span", { class: "tir-swatch", style: `background:${color}` }), `${label} ${String(s.tir[k] || 0).replace(".", ",")}%`)));
+}
+
+function renderGlucoseEvents(rows) {
+  $("#gluEventsEmpty").classList.toggle("hidden", rows.length > 0);
+  $("#gluEventRows").replaceChildren(...rows.map((e) => {
+    const details = typeof e.payload === "object" ? JSON.stringify(e.payload) : String(e.payload ?? "");
+    return el("tr", {}, el("td", {}, dateLabel(e.ts)), el("td", {}, gluEventType[e.type] || e.type), el("td", {}, details.length > 80 ? details.slice(0, 80) + "…" : details));
+  }));
+}
+
+async function connectAidex(deviceId) {
+  const r = await api("POST", `/v1/devices/${encodeURIComponent(deviceId)}/aidex/connect`, {});
+  $("#aidexActions").replaceChildren(
+    el("p", { class: "muted" }, "Abra este link para o paciente autorizar no AiDEX:"),
+    el("a", { href: r.authorize_url, target: "_blank", rel: "noopener", class: "link" }, "Abrir autorização AiDEX ↗"),
+  );
+  flash("Link de autorização gerado.");
+}
+
+function renderAidex(cgm, status) {
+  const box = $("#aidexStatus"); const actions = $("#aidexActions");
+  actions.replaceChildren();
+  if (!cgm) { box.textContent = "Este paciente não tem sensor de glicemia vinculado."; return; }
+  const st = (status && status.status) || "unlinked";
+  const label = { unlinked: "Não conectado", pending: "Aguardando autorização", linked: "Conectado", revoked: "Revogado — reautorizar", error: "Erro na coleta" }[st] || st;
+  const cls = st === "linked" ? "active" : (st === "error" || st === "revoked") ? "revoked" : "pending";
+  box.replaceChildren(
+    el("span", { class: "status-text " + cls }, label),
+    status && status.last_poll_at ? el("div", { class: "muted" }, `Última coleta: ${fmt(status.last_poll_at)}`) : null,
+    status && status.last_error ? el("div", { class: "muted" }, String(status.last_error)) : null,
+  );
+  if (isManager && st !== "linked") {
+    actions.append(el("button", { class: "btn", onclick: guard(() => connectAidex(cgm.id)) }, st === "unlinked" ? "Conectar AiDEX" : "Gerar novo link"));
+  }
+}
+
+function drawGlucoseChart(box, rows) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg != null ? r.avg : r.mmol) })).filter((p) => Number.isFinite(p.value));
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, "Sem leituras de glicose neste período.")); return; }
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 210"); svg.setAttribute("role", "presentation"); svg.setAttribute("preserveAspectRatio", "none");
+  const dataMin = Math.min(...points.map((p) => p.value)); const dataMax = Math.max(...points.map((p) => p.value));
+  const lo = Math.min(3, Math.floor(dataMin - 1)); const hi = Math.max(14, Math.ceil(dataMax + 1));
+  const y = (v) => 184 - ((v - lo) / Math.max(1, hi - lo)) * 158;
+  const target = document.createElementNS(NS, "rect"); target.setAttribute("x", "0"); target.setAttribute("width", "800"); target.setAttribute("y", String(y(10))); target.setAttribute("height", String(y(3.9) - y(10))); target.setAttribute("class", "glu-target"); svg.append(target);
+  [3.9, 10].forEach((v) => { const line = document.createElementNS(NS, "line"); line.setAttribute("x1", "0"); line.setAttribute("x2", "800"); line.setAttribute("y1", String(y(v))); line.setAttribute("y2", String(y(v))); line.setAttribute("class", "glu-limit"); svg.append(line); });
+  const xy = points.map((p, i) => [points.length === 1 ? 400 : 18 + i * 764 / (points.length - 1), y(p.value)]);
+  const d = xy.map(([x, yy], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yy.toFixed(1)}`).join(" ");
+  const path = document.createElementNS(NS, "path"); path.setAttribute("d", d); path.setAttribute("class", "glu-line"); svg.append(path);
+  xy.forEach(([x, yy], i) => { const c = document.createElementNS(NS, "circle"); c.setAttribute("cx", String(x)); c.setAttribute("cy", String(yy)); c.setAttribute("r", points.length > 48 ? "2" : "3.4"); const v = points[i].value; c.setAttribute("class", "glu-dot" + (v < 3.9 ? " lowdot" : v > 10 ? " highdot" : "")); c.setAttribute("aria-label", `${dateLabel(points[i].ts)}: ${v.toFixed(1)} mmol/L`); svg.append(c); });
+  box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${dataMin.toFixed(1).replace(".", ",")}–${dataMax.toFixed(1).replace(".", ",")} mmol/L`, dateLabel(points.at(-1).ts)));
+}
+
+function drawPatientHr(box, rows, hasBand) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg != null ? r.avg : r.bpm) })).filter((p) => Number.isFinite(p.value));
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de FC neste período." : "Paciente sem pulseira vinculada.")); return; }
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 210"); svg.setAttribute("role", "presentation"); svg.setAttribute("preserveAspectRatio", "none");
+  const min = Math.min(...points.map((p) => p.value)); const max = Math.max(...points.map((p) => p.value));
+  const pad = Math.max(5, Math.ceil((max - min) * 0.15)); const lo = Math.max(0, min - pad); const hi = max + pad;
+  const xy = points.map((p, i) => [points.length === 1 ? 400 : 18 + i * 764 / (points.length - 1), 184 - ((p.value - lo) / Math.max(1, hi - lo)) * 158]);
+  [26, 78, 130, 184].forEach((yv) => { const line = document.createElementNS(NS, "line"); line.setAttribute("x1", "0"); line.setAttribute("x2", "800"); line.setAttribute("y1", String(yv)); line.setAttribute("y2", String(yv)); line.setAttribute("class", "chart-grid"); svg.append(line); });
+  const d = xy.map(([x, yv], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yv.toFixed(1)}`).join(" ");
+  const area = document.createElementNS(NS, "path"); area.setAttribute("d", `${d} L${xy.at(-1)[0]},184 L${xy[0][0]},184 Z`); area.setAttribute("class", "chart-area"); svg.append(area);
+  const line = document.createElementNS(NS, "path"); line.setAttribute("d", d); line.setAttribute("class", "chart-line"); svg.append(line);
+  box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${Math.min(...points.map((p) => p.value))}–${Math.max(...points.map((p) => p.value))} bpm`, dateLabel(points.at(-1).ts)));
+}
+
+async function loadPatientData() {
+  const patient = patients.find((p) => p.id === selectedPatientId);
+  if (!patient) return setPatientEmpty("Selecione um paciente.");
+  const request = ++patRequest;
+  $("#patNotice").classList.add("hidden");
+  $("#patUpdatedAt").textContent = "Atualizando…";
+  const to = Date.now(); const from = to - Number($("#patRange").value); const span = to - from;
+  try {
+    const detail = await api("GET", `/v1/patients/${encodeURIComponent(patient.id)}`);
+    if (request !== patRequest || !apiKey) return;
+    const band = detail.devices.find((d) => d.type === "miband");
+    const cgm = detail.devices.find((d) => d.type === "cgm");
+    renderPatientHeader(detail, band, cgm);
+
+    $("#kGluNow").textContent = patient.last_glucose != null ? mmolLabel(patient.last_glucose) : "—";
+    $("#kGluNowAt").textContent = patient.last_glucose_ts ? dateLabel(patient.last_glucose_ts) : "sem leituras";
+    $("#kAlerts").textContent = patient.unacked_alerts != null ? patient.unacked_alerts : "0";
+
+    const bucket = span <= 86_400_000 ? "15m" : "1h";
+    const win = `from=${from}&to=${to}`;
+    const tasks = {};
+    if (cgm) {
+      tasks.glu = api("GET", `/v1/devices/${cgm.id}/glucose?${win}&bucket=${bucket}&limit=1000`).catch(() => null);
+      tasks.gsum = api("GET", `/v1/devices/${cgm.id}/glucose/summary?${win}`).catch(() => null);
+      tasks.gev = api("GET", `/v1/devices/${cgm.id}/glucose/events?${win}&limit=30&order=desc`).catch(() => null);
+      tasks.aidex = api("GET", `/v1/devices/${cgm.id}/aidex`).catch(() => null);
+    }
+    if (band) {
+      tasks.hr = api("GET", `/v1/devices/${band.id}/heart-rate?${win}&bucket=${bucket}&limit=1000`).catch(() => null);
+      tasks.hrsum = api("GET", `/v1/devices/${band.id}/summary?${win}`).catch(() => null);
+    }
+    const keys = Object.keys(tasks);
+    const vals = await Promise.all(keys.map((k) => tasks[k]));
+    if (request !== patRequest || !apiKey) return;
+    const r = Object.fromEntries(keys.map((k, i) => [k, vals[i]]));
+
+    drawGlucoseChart($("#gluChart"), (r.glu && r.glu.data) || []);
+    const s = r.gsum;
+    $("#kTir").textContent = s && s.samples ? `${Math.round(s.tir.in_range)}%` : "—";
+    $("#kGmi").textContent = s && s.gmi_percent != null ? `${String(s.gmi_percent).replace(".", ",")}%` : "—";
+    $("#kGluMean").textContent = s && s.mean_mmol != null ? `glicose média ${mmolLabel(s.mean_mmol)}` : "glicose média —";
+    renderTir(s);
+    renderGlucoseEvents((r.gev && r.gev.data) || []);
+    renderAidex(cgm, r.aidex);
+
+    drawPatientHr($("#patHrChart"), (r.hr && r.hr.data) || [], !!band);
+    const h = (r.hrsum && r.hrsum.heart_rate) || {};
+    $("#kHr").textContent = h.samples ? `${h.avg} bpm` : "—";
+    $("#kHrRange").textContent = h.samples ? `mín. ${h.min} · máx. ${h.max}` : "sem amostras";
+
+    $("#patUpdatedAt").textContent = `Atualizado ${fmt(Date.now())}`;
+  } catch (e) {
+    if (e.message !== "unauthorized") { const n = $("#patNotice"); n.className = "notice error"; n.classList.remove("hidden"); n.textContent = e.message; setPatientEmpty("Não foi possível carregar os dados."); }
+  }
+}
+
+$("#patReload").addEventListener("click", guard(loadPatientData));
+$("#patSelect").addEventListener("change", (e) => { selectedPatientId = e.target.value; guard(loadPatientData)(); });
+$("#patRange").addEventListener("change", guard(loadPatientData));
 
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 start();

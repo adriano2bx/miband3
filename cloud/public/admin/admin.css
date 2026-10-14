@@ -237,3 +237,23 @@
     .monitor-kpis dd { font-size: 19px; }
     .monitor-chart, .monitor-table-panel { padding: 15px; }
   }
+
+/* ---- visão Pacientes (consolidada) ---- */
+.patient-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 4px 0 14px; }
+.patient-id { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.patient-id h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.3px; }
+.patient-id .mono { color: var(--text-2); font-size: 13px; }
+.dev-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.dev-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--outline); background: var(--surface); color: var(--text); }
+.dev-chip.on { border-color: var(--primary-soft); background: var(--primary-soft); color: var(--primary); }
+.tir-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 12px 0 8px; background: var(--outline); }
+.tir-seg { height: 100%; }
+.tir-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--text-2); }
+.tir-key { display: inline-flex; align-items: center; gap: 5px; }
+.tir-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.glu-target { fill: #2f9e6f; opacity: .10; }
+.glu-limit { stroke: #2f9e6f; stroke-width: 1; stroke-dasharray: 4 4; opacity: .5; }
+.glu-line { fill: none; stroke: #126C64; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.glu-dot { fill: #126C64; stroke: #fff; stroke-width: 1.5; }
+.glu-dot.lowdot { fill: #d64545; }
+.glu-dot.highdot { fill: #e0a100; }

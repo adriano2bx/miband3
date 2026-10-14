@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { env } from "cloudflare:test";
 import { call } from "./helpers";
 
 describe("pacientes (fundação)", () => {
@@ -42,5 +43,17 @@ describe("pacientes (fundação)", () => {
     expect(devAfter.json.patient_id).toBeNull();
     const list2 = await call("GET", "/v1/patients");
     expect(list2.json.data.find((p: any) => p.id === pid)).toBeUndefined();
+  });
+
+  it("listagem consolidada traz has_cgm e a última glicemia", async () => {
+    const pid = (await call("POST", "/v1/patients", { body: { name: "Consolidado" } })).json.id as string;
+    const cgm = (await call("POST", "/v1/devices", { body: { name: "CGM", type: "cgm", patient_id: pid } })).json.id as string;
+    await env.DB.prepare("INSERT INTO glucose (device_id, ts, mmol, warning) VALUES (?,?,?,?)").bind(cgm, Date.now(), 7.2, null).run();
+
+    const row = (await call("GET", "/v1/patients")).json.data.find((p: any) => p.id === pid);
+    expect(row.has_cgm).toBe(true);
+    expect(row.has_band).toBe(false);
+    expect(row.last_glucose).toBe(7.2);
+    expect(row.device_count).toBe(1);
   });
 });
