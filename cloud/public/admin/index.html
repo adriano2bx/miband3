@@ -26,7 +26,7 @@
       <p class="sub">Entre com uma credencial individual. O acesso de gestão continua disponível pela chave administrativa.</p>
       <div class="login-switch" role="group" aria-label="Tipo de acesso">
         <button type="button" data-login-mode="admin" aria-pressed="true">Gestão</button>
-        <button type="button" data-login-mode="tech" aria-pressed="false">Técnico</button>
+        <button type="button" data-login-mode="tech" aria-pressed="false">Acesso individual</button>
       </div>
       <form id="loginForm">
         <div id="adminLoginFields">
@@ -38,7 +38,7 @@
           <input id="techCredential" autocomplete="username">
           <label for="techPassword" style="margin-top:12px">Senha</label>
           <input id="techPassword" type="password" autocomplete="current-password">
-          <p class="muted" style="margin:10px 0 0">Acesso ao painel somente para técnicos autorizados pela gestão.</p>
+          <p class="muted" style="margin:10px 0 0">Acesso individual concedido pela gestão — técnico responsável, voluntário ou pessoa autorizada (seguidor).</p>
         </div>
         <div style="margin-top:16px"><button class="btn" type="submit">Entrar</button></div>
       </form>
@@ -49,6 +49,7 @@
 
 <section id="app" class="hidden">
   <nav aria-label="Seções administrativas">
+    <button data-tab="patients">Voluntários</button>
     <button data-tab="installs" aria-current="page">Instalações</button>
     <button data-tab="monitor">Monitoramento</button>
     <button data-tab="terms">Termos de participação</button>
@@ -102,7 +103,7 @@
       </div>
       <div class="monitor-filters">
         <div><label for="monitorDevice">Participante / instalação</label><select id="monitorDevice"></select></div>
-        <div><label for="monitorRange">Período</label><select id="monitorRange"><option value="86400000">Últimas 24 horas</option><option value="604800000" selected>Últimos 7 dias</option><option value="2592000000">Últimos 30 dias</option></select></div>
+        <div><label for="monitorRange">Período</label><select id="monitorRange"><option value="86400000">Últimas 24 horas</option><option value="604800000" selected>Últimos 7 dias</option><option value="2592000000">Últimos 30 dias</option><option value="7776000000">Últimos 90 dias</option><option value="31536000000">Último 1 ano</option></select></div>
       </div>
       <div id="monitorNotice" class="notice hidden" role="status"></div>
       <dl class="monitor-kpis" aria-label="Resumo do período">
@@ -134,6 +135,79 @@
         </section>
       </div>
       <p class="monitor-footnote">As séries mostram somente os dados recebidos e armazenados pela nuvem; períodos sem amostras permanecem vazios.</p>
+    </section>
+
+    <!-- Voluntários (visão consolidada: pulseira + glicemia) -->
+    <section data-panel="patients" class="hidden" aria-labelledby="patientsTitle">
+      <div class="page-heading monitor-heading">
+        <div><p class="eyebrow">Acompanhamento / Visão por pessoa</p>
+          <h1 id="patientsTitle">Voluntários</h1>
+          <p class="sub">Pulseira BIOSENSE Pulse e sensor de glicemia AiDEX consolidados por voluntário.</p></div>
+        <div class="refresh-control"><span id="patUpdatedAt" class="muted" role="status">Selecione um voluntário</span>
+          <button class="btn secondary" id="patReload">Atualizar <span aria-hidden="true">↻</span></button></div>
+      </div>
+      <div class="monitor-filters">
+        <div><label for="patSelect">Voluntário</label><select id="patSelect"></select></div>
+        <div><label for="patRange">Período</label><select id="patRange">
+          <option value="86400000">Últimas 24 horas</option>
+          <option value="604800000">Últimos 7 dias</option>
+          <option value="1209600000" selected>Últimos 14 dias</option>
+          <option value="2592000000">Últimos 30 dias</option>
+          <option value="7776000000">Últimos 90 dias</option>
+          <option value="31536000000">Último 1 ano</option></select></div>
+        <div class="pat-export-field"><label>Exportar histórico (CSV)</label><div class="actions" id="patExport"></div></div>
+      </div>
+      <div id="patNotice" class="notice hidden" role="status"></div>
+      <div id="patHeader" class="patient-header"></div>
+      <div id="patAlerts" class="patient-alerts"></div>
+      <dl class="monitor-kpis" aria-label="Resumo do voluntário">
+        <div><dt>Glicemia atual</dt><dd id="kGluNow">—</dd><small id="kGluNowAt">sem leituras</small></div>
+        <div><dt>No alvo (TIR)</dt><dd id="kTir">—</dd><small id="kTirRange">3,9–10,0 mmol/L</small></div>
+        <div><dt>GMI</dt><dd id="kGmi">—</dd><small id="kGluMean">glicose média —</small></div>
+        <div><dt>FC média</dt><dd id="kHr">—</dd><small id="kHrRange">sem amostras</small></div>
+        <div><dt>Passos</dt><dd id="kSteps">—</dd><small>máximo no período</small></div>
+        <div><dt>Sono estimado</dt><dd id="kSleep">—</dd><small>classificação provisória</small></div>
+        <div><dt>Alertas</dt><dd id="kAlerts">—</dd><small>não reconhecidos</small></div>
+      </dl>
+      <div class="monitor-grid">
+        <section class="monitor-chart" aria-labelledby="gluChartTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Glicemia (CGM AiDEX)</p><h2 id="gluChartTitle">Curva de glicose</h2></div><span class="chart-unit">mmol/L</span></div>
+          <div class="chart" id="gluChart" role="img" aria-label="Gráfico de glicose"></div>
+          <div class="tir-bar" id="tirBar" aria-hidden="true"></div>
+          <div class="tir-legend" id="tirLegend"></div>
+        </section>
+        <section class="monitor-chart" aria-labelledby="patHrChartTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Pulseira BIOSENSE Pulse</p><h2 id="patHrChartTitle">Frequência cardíaca</h2></div><span class="chart-unit">bpm</span></div>
+          <div class="chart" id="patHrChart" role="img" aria-label="Gráfico de frequência cardíaca"></div>
+        </section>
+        <section class="monitor-chart" aria-labelledby="patStepsTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Atividade diária</p><h2 id="patStepsTitle">Passos</h2></div><span class="chart-unit">passos</span></div>
+          <div class="chart" id="patStepsChart" role="img" aria-label="Gráfico de passos"></div>
+        </section>
+        <section class="monitor-table-panel">
+          <div class="monitor-section-head"><div><p class="eyebrow">Linha do tempo</p><h2>Eventos de glicemia</h2></div></div>
+          <p class="muted">Refeições, insulina, exercício e medicação registrados na AiDEX.</p>
+          <div class="table-wrap"><table><thead><tr><th>Quando</th><th>Tipo</th><th>Detalhes</th></tr></thead><tbody id="gluEventRows"></tbody></table></div>
+          <p class="muted" id="gluEventsEmpty">Sem eventos no período.</p>
+        </section>
+        <section class="monitor-table-panel" id="aidexPanel">
+          <div class="monitor-section-head"><div><p class="eyebrow">Integração</p><h2>Sensor AiDEX</h2></div></div>
+          <div id="aidexStatus" class="muted">—</div>
+          <div class="actions" id="aidexActions" style="margin-top:12px"></div>
+          <div id="gluRules" class="glu-rules"></div>
+          <p class="muted">A coleta é automática a cada 15 min após o voluntário autorizar.</p>
+        </section>
+      </div>
+      <section class="monitor-table-panel" style="margin-top:14px" aria-labelledby="recTitle">
+        <div class="monitor-section-head">
+          <div><p class="eyebrow">Histórico completo</p><h2 id="recTitle">Lista de registros</h2></div>
+          <select id="recStream" style="max-width:240px;min-height:40px"></select>
+        </div>
+        <div class="table-wrap"><table><thead id="recHead"></thead><tbody id="recRows"></tbody></table></div>
+        <p class="muted" id="recEmpty">Selecione um voluntário para listar os registros.</p>
+        <div class="registry-pagination"><span id="recCount" role="status"></span><button id="recMore" class="link hidden">Carregar mais</button></div>
+      </section>
+      <p class="monitor-footnote">Faixas de glicose (mmol/L): &lt;3,0 muito baixa · 3,0–3,9 baixa · 3,9–10,0 no alvo · 10,0–13,9 alta · &gt;13,9 muito alta. A lista de registros mostra os dados brutos recebidos.</p>
     </section>
 
     <!-- Termo -->

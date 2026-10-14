@@ -156,6 +156,37 @@ Eventos: `alert.created`, `device.online`, `device.offline`, `command.updated`, 
 - **Dados de saúde são sensíveis (LGPD).** Use HTTPS (padrão no Workers), chaves restritas por paciente, defina `RETENTION_DAYS` e obtenha o consentimento do paciente. O D1 não é criptografado por campo.
 - Sem limitação de taxa (rate limit) por chave — configure regras na Cloudflare (WAF/Rate Limiting) à frente do Worker se expuser a API publicamente.
 
+## Módulo AiDEX (glicemia)
+
+Integração **somente-leitura** com a **AiDEX API Open Platform** (OAuth 2.0) para trazer a glicemia do sensor CGM para junto dos dados da pulseira, por paciente (`device`). Tudo é server-to-server a partir do Worker; nada trafega pelo app Android. O paciente (dono do sensor) autoriza na tela oficial da AiDEX e pode revogar quando quiser no app AiDEX.
+
+```
+Sensor AiDEX ─▶ nuvem MicroTech ◀──OAuth 2.0── Worker (cron /15min) ──▶ D1 (glucose) ──▶ API /v1 + painel
+```
+
+**Configuração (uma vez):**
+
+1. No **Console da AiDEX** (`aidexapi.microtechmd.com` → My App), crie o app e registre o `redirect_uri` **exatamente** como o callback do Worker:
+   `https://biosense.deltabots.com.br/v1/aidex/callback` (ou a URL `workers.dev`).
+2. Defina as credenciais:
+   - `AIDEX_CLIENT_ID` em `vars` (wrangler.jsonc) — não é segredo.
+   - `AIDEX_CLIENT_SECRET` como segredo: `npx wrangler secret put AIDEX_CLIENT_SECRET`.
+   - `AIDEX_ENV`: `sandbox` (padrão) ou `production` (só após o *Upgrade App* aprovado).
+3. Aplique a migração: `npm run db:migrate:remote` (tabelas `aidex_links`, `glucose`, `glucose_events`).
+
+**Vincular um paciente:**
+
+```bash
+# 1. Gera a URL de autorização (o paciente abre e autoriza na AiDEX)
+curl -X POST .../v1/devices/{id}/aidex/connect -H 'authorization: Bearer <chave>' -d '{}'
+#    -> { "authorize_url": "https://.../v1/oauth2/authorize?clientId=...&state=..." }
+# 2. O callback grava os tokens e já dispara a 1ª coleta. A partir daí o cron coleta sozinho.
+```
+
+**Consumir:** `GET /v1/devices/{id}/glucose` (bruto ou `?bucket=5m`), `GET /v1/devices/{id}/glucose/summary` (TIR, média, GMI, CV — janela padrão 14 dias), `GET /v1/devices/{id}/glucose/events`, `GET /v1/devices/{id}/aidex` (estado do vínculo). A glicemia da API vem em **mmol/L**; a janela máxima por consulta à AiDEX é de 30 dias (o coletor pagina sozinho) e o backfill inicial é limitado por `AIDEX_BACKFILL_DAYS` (padrão 90).
+
+> **Segredos em repouso:** diferente do token da pulseira (guardado só como hash), os tokens OAuth ficam em claro na D1 porque precisam ser reapresentados à AiDEX. Restrinja o acesso à D1 e defina `RETENTION_DAYS`.
+
 ## Interface administrativa
 
 O frontend de `/admin/` usa HTML, CSS e JavaScript reais, com dados e ações pela API existente. A identidade BIOSENSE/Deltabots inclui tema claro, lista de instalações com detalhe selecionável e o asset local `public/admin/assets/biosense-pulse.png`. Os contadores representam os registros carregados do filtro atual; quando há outra página, use **Carregar mais**. O horário junto de **Atualizar** indica a última consulta bem-sucedida. A janela de comandos atualiza o estado a cada 2,5 segundos.

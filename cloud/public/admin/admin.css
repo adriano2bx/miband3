@@ -108,6 +108,8 @@
   .device-cell { display: flex; align-items: center; gap: 8px; }
   .pulse-icon { display: block; object-fit: contain; width: 32px; height: 44px; flex: none; }
   .device-heading .pulse-icon { width: 46px; height: 68px; }
+  .cgm-icon { display: block; object-fit: contain; width: 40px; height: 40px; flex: none; }
+  .device-heading .cgm-icon { width: 58px; height: 58px; }
   .device-id, .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
   .device-id { background: none; border: 0; padding: 0; cursor: pointer; color: var(--text); text-align: left; }
   .device-cell small { display: block; color: var(--text-2); font-size: 10px; margin-top: 3px; white-space: nowrap; }
@@ -235,3 +237,53 @@
     .monitor-kpis dd { font-size: 19px; }
     .monitor-chart, .monitor-table-panel { padding: 15px; }
   }
+
+/* ---- visão Pacientes (consolidada) ---- */
+.patient-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 4px 0 14px; }
+.patient-id { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.patient-id h2 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -.3px; }
+.patient-id .mono { color: var(--text-2); font-size: 13px; }
+.dev-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.dev-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--outline); background: var(--surface); color: var(--text); }
+.dev-chip.on { border-color: var(--primary-soft); background: var(--primary-soft); color: var(--primary); }
+.tir-bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 12px 0 8px; background: var(--outline); }
+.tir-seg { height: 100%; }
+.tir-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--text-2); }
+.tir-key { display: inline-flex; align-items: center; gap: 5px; }
+.tir-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.glu-target { fill: #2f9e6f; opacity: .10; }
+.glu-limit { stroke: #2f9e6f; stroke-width: 1; stroke-dasharray: 4 4; opacity: .5; }
+.glu-line { fill: none; stroke: #126C64; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.glu-dot { fill: #126C64; stroke: #fff; stroke-width: 1.5; }
+.glu-dot.lowdot { fill: #d64545; }
+.glu-dot.highdot { fill: #e0a100; }
+.pat-export-field .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 0; }
+#patExport .btn { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+.chart { position: relative; }
+.chart-tip { position: absolute; pointer-events: none; background: #1e2430; color: #fff; padding: 5px 9px; border-radius: 6px; font-size: 11px; line-height: 1.35; white-space: nowrap; z-index: 3; box-shadow: 0 2px 10px rgba(0,0,0,.22); }
+.chart-tip b { display: block; font-weight: 600; }
+.chart-tip span { opacity: .8; }
+.chart-tip.hidden { display: none; }
+.chart-cross { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 3 3; opacity: .45; }
+.chart-marker { fill: #fff; stroke: var(--primary); stroke-width: 2.5; }
+/* ---- alertas na aba Voluntários ---- */
+.patient-alerts { display: grid; gap: 6px; margin-bottom: 14px; }
+.patient-alerts:empty { display: none; }
+.alerts-head { display: flex; align-items: center; gap: 8px; }
+.alert-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--outline); border-left: 3px solid var(--text-2); border-radius: 8px; background: var(--surface); }
+.alert-row .alert-body { flex: 1; min-width: 0; }
+.alert-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); flex: none; }
+.alert-row.sev-critical { border-left-color: var(--error); }
+.alert-row.sev-critical .alert-dot { background: var(--error); }
+.alert-row.sev-warning { border-left-color: var(--warning); }
+.alert-row.sev-warning .alert-dot { background: var(--warning); }
+.alert-row.sev-info { border-left-color: var(--primary); }
+.alert-row.sev-info .alert-dot { background: var(--primary); }
+.alert-row .btn { min-height: 34px; padding: 6px 12px; font-size: 12px; flex: none; }
+/* ---- editor de regras de glicemia ---- */
+.glu-rules { display: grid; gap: 6px; }
+.glu-rule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.glu-rule-name { flex: 1; min-width: 120px; color: var(--text); }
+.glu-rule input[type="checkbox"] { width: auto; min-height: auto; }
+.glu-thr { width: 84px; min-height: 34px; padding: 4px 8px; }
+.glu-rule .btn { min-height: 34px; padding: 5px 10px; font-size: 12px; }

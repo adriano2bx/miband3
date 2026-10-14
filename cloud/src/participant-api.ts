@@ -17,6 +17,7 @@ import {
   type DeviceRowLite,
 } from "./participants";
 import { newId, parseJson, randomToken, sha256Hex } from "./util";
+import { audit } from "./audit";
 
 /**
  * Contratos usados pelo app BIOSENSE: termo vigente, adesão (instalação + consentimento),
@@ -199,6 +200,7 @@ participantApi.post("/v1/panel/login", async (c) => {
     db.prepare("INSERT INTO panel_sessions (id, token_hash, technician_id, created_at, expires_at, max_expires_at) VALUES (?, ?, ?, ?, ?, ?)")
       .bind(newId("pws"), await sha256Hex(token), tech.id, now, expires, now + TECH_SESSION_MAX_MS),
   ]);
+  await audit(c.env, { principal: `tech:${tech.id}`, action: "panel.login", detail: tech.name });
   return c.json({ session_token: token, expires_at: expires, idle_timeout_s: TECH_SESSION_IDLE_MS / 1000, technician: { name: tech.name }, scopes: ["read"] }, 201);
 });
 
@@ -378,8 +380,18 @@ participantApi.post("/v1/technicians", requireAuth("admin"), async (c) => {
 });
 
 participantApi.get("/v1/technicians", requireAuth("admin"), async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT id, credential, name, scopes, created_at, disabled_at, locked_until FROM technicians ORDER BY created_at DESC").all();
-  return c.json({ data: results.map((t) => ({ ...t, scopes: parseJson(t.scopes as string, []) })) });
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, credential, name, scopes, created_at, disabled_at, locked_until,
+       (SELECT group_concat(patient_id) FROM technician_patients tp WHERE tp.technician_id = technicians.id) AS patient_ids
+     FROM technicians ORDER BY created_at DESC`,
+  ).all();
+  return c.json({
+    data: results.map((t) => ({
+      ...t,
+      scopes: parseJson(t.scopes as string, []),
+      patient_ids: t.patient_ids ? String(t.patient_ids).split(",") : [],
+    })),
+  });
 });
 
 participantApi.patch("/v1/technicians/:tid", requireAuth("admin"), async (c) => {
@@ -415,5 +427,95 @@ participantApi.delete("/v1/technicians/:tid", requireAuth("admin"), async (c) =>
   await c.env.DB.prepare("UPDATE tech_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(now, tid).run();
   await c.env.DB.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(now, tid).run();
   return c.json({ disabled: tid });
+});
+
+// ====================================================================== seguidores (acesso por paciente)
+
+const FollowerInput = z.object({
+  name: z.string().trim().min(1).max(120),
+  credential: z.string().trim().min(3).max(120),
+  password: z.string().min(8).max(200),
+  // Consentimento do voluntário para este seguidor (ex.: "autorizado pelo voluntário em DD/MM").
+  consent_note: z.string().max(500).nullish(),
+});
+
+/**
+ * Cria um seguidor: conta de painel só-leitura amarrada ao paciente. Entra no
+ * painel pelo login de técnico (credencial + senha) e só enxerga os devices
+ * (pulseira e/ou CGM) daquele paciente.
+ */
+participantApi.post("/v1/patients/:pid/followers", requireAuth("manage"), async (c) => {
+  if (c.get("principal").deviceIds) return c.json({ error: "forbidden", message: "Chaves restritas não criam seguidores." }, 403);
+  const pid = c.req.param("pid");
+  const pat = await c.env.DB.prepare("SELECT id FROM patients WHERE id = ? AND archived_at IS NULL").bind(pid).first();
+  if (!pat) return c.json({ error: "not_found", message: "Paciente não encontrado." }, 404);
+  const b = await json(c, FollowerInput);
+  if (!b.ok) return b.res;
+  const exists = await c.env.DB.prepare("SELECT 1 FROM technicians WHERE credential = ?").bind(b.data.credential).first();
+  if (exists) return c.json({ error: "conflict", message: "Credencial já existe." }, 409);
+  const id = newId("tec");
+  const now = Date.now();
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT INTO technicians (id, credential, name, password_hash, scopes, created_at) VALUES (?,?,?,?,?,?)")
+      .bind(id, b.data.credential, b.data.name, await hashPassword(b.data.password), JSON.stringify(["panel_read"]), now),
+    c.env.DB.prepare("INSERT INTO technician_patients (technician_id, patient_id, created_at, granted_by, consent_note) VALUES (?,?,?,?,?)")
+      .bind(id, pid, now, c.get("principal").id, b.data.consent_note ?? null),
+  ]);
+  await audit(c.env, { principal: c.get("principal").id, action: "follower.grant", patient_id: pid, detail: `${b.data.name} (${b.data.credential})` });
+  return c.json({ id, credential: b.data.credential, name: b.data.name, patient_id: pid, role: "follower" }, 201);
+});
+
+participantApi.get("/v1/patients/:pid/followers", requireAuth("manage"), async (c) => {
+  if (c.get("principal").deviceIds) return c.json({ error: "forbidden" }, 403);
+  const { results } = await c.env.DB.prepare(
+    `SELECT t.id, t.credential, t.name, t.scopes, t.created_at, t.disabled_at, t.locked_until,
+            tp.granted_by, tp.consent_note, tp.created_at AS granted_at
+     FROM technicians t JOIN technician_patients tp ON tp.technician_id = t.id
+     WHERE tp.patient_id = ? AND t.disabled_at IS NULL ORDER BY t.created_at DESC`,
+  ).bind(c.req.param("pid")).all();
+  return c.json({ data: results.map((t) => ({ ...t, scopes: parseJson(t.scopes as string, []) })), count: results.length });
+});
+
+/** Remove o vínculo deste paciente com a conta; se não sobrar nenhum paciente, desativa a conta. */
+participantApi.delete("/v1/patients/:pid/followers/:tid", requireAuth("manage"), async (c) => {
+  if (c.get("principal").deviceIds) return c.json({ error: "forbidden" }, 403);
+  const now = Date.now();
+  const tid = c.req.param("tid");
+  const res = await c.env.DB.prepare("DELETE FROM technician_patients WHERE technician_id = ? AND patient_id = ?").bind(tid, c.req.param("pid")).run();
+  if (!res.meta.changes) return c.json({ error: "not_found" }, 404);
+  const rest = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM technician_patients WHERE technician_id = ?").bind(tid).first<{ n: number }>();
+  if ((rest?.n ?? 0) === 0) {
+    await c.env.DB.prepare("UPDATE technicians SET disabled_at = ? WHERE id = ? AND disabled_at IS NULL").bind(now, tid).run();
+  }
+  // Encerra as sessões para reavaliar o escopo imediatamente.
+  await c.env.DB.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(now, tid).run();
+  await audit(c.env, { principal: c.get("principal").id, action: "follower.revoke", patient_id: c.req.param("pid"), detail: tid });
+  return c.json({ removed: c.req.param("pid"), technician: tid, disabled: (rest?.n ?? 0) === 0 });
+});
+
+// ---- técnico responsável: atrelar / desatrelar vários voluntários (pacientes) ----
+
+participantApi.post("/v1/technicians/:tid/patients", requireAuth("admin"), async (c) => {
+  const tid = c.req.param("tid");
+  const tech = await c.env.DB.prepare("SELECT 1 FROM technicians WHERE id = ? AND disabled_at IS NULL").bind(tid).first();
+  if (!tech) return c.json({ error: "not_found", message: "Técnico não encontrado." }, 404);
+  const b = await json(c, z.object({ patient_id: z.string().min(1).max(40), consent_note: z.string().max(500).nullish() }));
+  if (!b.ok) return b.res;
+  const pat = await c.env.DB.prepare("SELECT 1 FROM patients WHERE id = ? AND archived_at IS NULL").bind(b.data.patient_id).first();
+  if (!pat) return c.json({ error: "not_found", message: "Paciente não encontrado." }, 404);
+  await c.env.DB.prepare("INSERT OR IGNORE INTO technician_patients (technician_id, patient_id, created_at, granted_by, consent_note) VALUES (?,?,?,?,?)")
+    .bind(tid, b.data.patient_id, Date.now(), c.get("principal").id, b.data.consent_note ?? null).run();
+  await c.env.DB.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(Date.now(), tid).run();
+  await audit(c.env, { principal: c.get("principal").id, action: "patient.attach", patient_id: b.data.patient_id, detail: tid });
+  return c.json({ technician: tid, patient_id: b.data.patient_id, attached: true }, 201);
+});
+
+participantApi.delete("/v1/technicians/:tid/patients/:pid", requireAuth("admin"), async (c) => {
+  const tid = c.req.param("tid");
+  const res = await c.env.DB.prepare("DELETE FROM technician_patients WHERE technician_id = ? AND patient_id = ?").bind(tid, c.req.param("pid")).run();
+  if (!res.meta.changes) return c.json({ error: "not_found" }, 404);
+  await c.env.DB.prepare("UPDATE panel_sessions SET revoked_at = ? WHERE technician_id = ? AND revoked_at IS NULL").bind(Date.now(), tid).run();
+  await audit(c.env, { principal: c.get("principal").id, action: "patient.detach", patient_id: c.req.param("pid"), detail: tid });
+  return c.json({ technician: tid, removed: c.req.param("pid") });
 });
 

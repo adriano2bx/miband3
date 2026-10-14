@@ -5,6 +5,7 @@ const KEY = "biosense.admin.key";
 const TECH_NAME = "biosense.admin.technician";
 let apiKey = sessionStorage.getItem(KEY) || "";
 let devices = [];
+let isManager = false;
 
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
@@ -17,6 +18,30 @@ function el(tag, attrs = {}, ...children) {
   return e;
 }
 const fmt = (ms) => (ms ? new Date(ms).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
+
+// Detalhes de evento legíveis (sem JSON cru): usa "description" quando houver, senão pares chave: valor.
+function eventDetails(data) {
+  if (data == null) return "—";
+  if (typeof data !== "object") return String(data);
+  if (data.description != null) return String(data.description);
+  const parts = Object.entries(data).map(([k, v]) => `${k}: ${v && typeof v === "object" ? JSON.stringify(v) : v}`);
+  return parts.length ? parts.join(" · ") : "—";
+}
+const EVENT_LABELS = { FELL_ASLEEP: "Adormeceu", WOKE_UP: "Acordou", DEEP_SLEEP: "Sono profundo", LIGHT_SLEEP: "Sono leve", AWAKE: "Acordado", STEP_GOAL: "Meta de passos", LOW_BATTERY: "Bateria baixa", CHARGING: "Carregando", FULLY_CHARGED: "Carga completa" };
+function eventTypeLabel(t) { return EVENT_LABELS[t] || String(t).replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
+// Janela de recência para o ponto verde de "leitura recente".
+const ONLINE_FRESH_MS = 5 * 60_000;
+// Eventos de bateria/carga são ruído na linha do tempo clínica.
+const isBatteryEvent = (type) => /batter|charg|carga|bateria/i.test(String(type || ""));
+// Tempo relativo ("há 12 min"), mais honesto que um "conectado" que pode estar velho.
+function ago(ts) {
+  if (!ts) return "sem leituras";
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return "agora há pouco";
+  if (s < 3600) return `há ${Math.floor(s / 60)} min`;
+  if (s < 86400) return `há ${Math.floor(s / 3600)} h`;
+  return `há ${Math.floor(s / 86400)} d`;
+}
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -79,17 +104,20 @@ async function start() {
   try {
     const me = await api("GET", "/v1/me");
     const canManage = me.scopes.includes("manage") || me.scopes.includes("admin");
+    isManager = canManage;
     const canRead = me.scopes.includes("read") || me.scopes.includes("admin");
     if (!canRead) return logout("Esta credencial não tem permissão de leitura.");
     $("#who").textContent = me.id === "admin" ? "Gestão" : me.id.startsWith("tech:") ? (sessionStorage.getItem(TECH_NAME) || "Técnico") : canManage ? "Gestão" : "Leitura";
     $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
+    // Sem gestão (seguidor/técnico só-leitura): só a aba Voluntários, que já traz o
+    // consolidado + a lista de registros completos. Monitoramento é a visão de estudo da gestão.
     document.querySelectorAll("nav [data-tab]").forEach((button) => {
-      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "monitor");
+      button.classList.toggle("hidden", !canManage && button.dataset.tab !== "patients");
     });
     if (canManage) {
       document.querySelector('[data-tab="installs"]').click();
     } else {
-      document.querySelector('[data-tab="monitor"]').click();
+      document.querySelector('[data-tab="patients"]').click();
     }
   } catch (e) { if (e.message !== "unauthorized") logout(e.message); }
 }
@@ -138,7 +166,7 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   document.querySelectorAll("nav button").forEach((x) => { if (x === b) x.setAttribute("aria-current", "page"); else x.removeAttribute("aria-current"); });
   document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== b.dataset.tab));
   $("#flash").replaceChildren();
-  ({ installs: loadInstalls, monitor: loadMonitorDevices, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
+  ({ installs: loadInstalls, monitor: loadMonitorDevices, patients: loadPatients, terms: loadTerms, techs: loadTechs, alerts: loadAlerts })[b.dataset.tab]();
 }));
 
 // ------------------------------------------------------------------ instalações
@@ -150,6 +178,11 @@ let installsRequest = 0;
 let loadedFilter = { status: "", q: "" };
 
 const pulseIcon = () => el("img", { class: "pulse-icon", src: "/admin/assets/biosense-pulse.png", alt: "", width: "32", height: "44" });
+// Ícone e nome do modelo conforme o tipo do dispositivo (pulseira × sensor de glicemia).
+const deviceModel = (d) => d.type === "cgm" ? "Sensor AiDEX" : "BIOSENSE Pulse";
+const deviceIcon = (d) => d.type === "cgm"
+  ? el("img", { class: "cgm-icon", src: "/admin/assets/cgm-sensor.png", alt: "", width: "40", height: "40" })
+  : pulseIcon();
 const shortId = (id) => id.length > 12 ? `…${id.slice(-8)}` : id;
 const onlineState = (d) => el("span", {}, el("span", { class: `dot ${d.online ? "on" : ""}`, "aria-hidden": "true" }), d.online ? "Online" : "Offline");
 const detailRow = (label, value) => el("div", {}, el("dt", {}, label), el("dd", {}, value));
@@ -165,7 +198,7 @@ function renderDetail() {
   const config = d.config || {};
   box.replaceChildren(
     el("p", { class: "eyebrow" }, "Instalação selecionada"),
-    el("div", { class: "device-heading" }, pulseIcon(), el("div", {}, el("h2", {}, "BIOSENSE Pulse"), el("div", { class: "mono detail-id", title: d.id }, d.id))),
+    el("div", { class: "device-heading" }, deviceIcon(d), el("div", {}, el("h2", {}, deviceModel(d)), el("div", { class: "mono detail-id", title: d.id }, d.id))),
     el("dl", { class: "detail-group" },
       detailRow("Participante", el("span", { class: "mono" }, d.patient_ref || "Não vinculado")),
       detailRow("Situação", el("span", { class: `status-text ${d.status}` }, statusLabel[d.status] || d.status)),
@@ -196,9 +229,9 @@ function renderInstalls() {
       renderDetail();
     };
     return el("tr", { class: d.id === selectedDeviceId ? "selected" : "", "data-id": d.id, onclick: select },
-      el("td", {}, el("div", { class: "device-cell" }, pulseIcon(), el("div", {},
-        el("button", { class: "device-id", "data-id": d.id, title: d.id, "aria-pressed": String(d.id === selectedDeviceId), "aria-label": `Selecionar BIOSENSE Pulse ${d.id}`, "aria-controls": "deviceDetail" }, shortId(d.id)),
-        el("small", {}, "BIOSENSE Pulse")))),
+      el("td", {}, el("div", { class: "device-cell" }, deviceIcon(d), el("div", {},
+        el("button", { class: "device-id", "data-id": d.id, title: d.id, "aria-pressed": String(d.id === selectedDeviceId), "aria-label": `Selecionar ${deviceModel(d)} ${d.id}`, "aria-controls": "deviceDetail" }, shortId(d.id)),
+        el("small", {}, deviceModel(d))))),
       el("td", { class: "mono" }, d.patient_ref || el("span", { class: "muted" }, "Não vinculado")),
       el("td", {}, el("span", { class: `status-text ${d.status}` }, statusLabel[d.status] || d.status)),
       el("td", {}, onlineState(d), el("div", { class: "muted last-contact" }, `Visto ${fmt(d.last_seen_at)}`)),
@@ -502,16 +535,13 @@ async function loadMonitorData() {
     $("#sleepRows").replaceChildren(...(sleep.data || []).slice().reverse().map((row) => el("tr", {},
       el("td", {}, fmt(row.start)), el("td", {}, durationLabel(row.duration_min)), el("td", {}, `${row.deep_min} min`), el("td", {}, `${row.light_min} min`), el("td", {}, row.avg_hr == null ? "—" : `${row.avg_hr} bpm`))));
     $("#sleepEmpty").classList.toggle("hidden", Boolean(sleep.count));
-    $("#eventRows").replaceChildren(...(events.data || []).map((row) => {
-      const details = row.data == null ? "—" : JSON.stringify(row.data);
-      return el("tr", {}, el("td", {}, fmt(row.ts)), el("td", {}, row.type), el("td", {}, details.length > 100 ? `${details.slice(0, 100)}…` : details));
+    const shownEvents = (events.data || []).filter((row) => !isBatteryEvent(row.type));
+    $("#eventRows").replaceChildren(...shownEvents.map((row) => {
+      const details = eventDetails(row.data);
+      return el("tr", {}, el("td", {}, fmt(row.ts)), el("td", {}, eventTypeLabel(row.type)), el("td", {}, details.length > 120 ? `${details.slice(0, 120)}…` : details));
     }));
-    $("#eventsEmpty").classList.toggle("hidden", Boolean(events.count));
+    $("#eventsEmpty").classList.toggle("hidden", shownEvents.length > 0);
     $("#monitorUpdatedAt").textContent = `Atualizado às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
-    if (sleep.warning) {
-      notice.textContent = "Sono: " + sleep.warning;
-      notice.className = "notice warn";
-    }
   } catch (e) {
     if (request === monitorRequest && e.message !== "unauthorized") {
       notice.textContent = e.message; notice.className = "notice error";
@@ -605,6 +635,425 @@ const loadAlerts = guard(async () => {
   )));
   $("#alertsEmpty").textContent = data.length ? "" : "Nenhum alerta pendente.";
 });
+
+// ------------------------------------------------------------------ voluntários (visão consolidada)
+let patients = [];
+let selectedPatientId = "";
+let patRequest = 0;
+const NS = "http://www.w3.org/2000/svg";
+const mmolLabel = (v) => (v == null ? "—" : `${Number(v).toFixed(1).replace(".", ",")} mmol/L`);
+const TIR_BANDS = [
+  ["very_low", "Muito baixa", "#8a1c1c"],
+  ["low", "Baixa", "#d64545"],
+  ["in_range", "No alvo", "#2f9e6f"],
+  ["high", "Alta", "#e0a100"],
+  ["very_high", "Muito alta", "#b25f00"],
+];
+const gluEventType = { diet: "Refeição", exercise: "Exercício", medication: "Medicação", insulin: "Insulina", other: "Outro" };
+
+// Lista de registros completos (dados brutos) por fluxo. dev: 'cgm' ou 'band'.
+const REC_STREAMS = {
+  glucose: { label: "Glicemia", dev: "cgm", cols: ["Quando", "Glicose (mmol/L)", "Aviso"], row: (r) => [fmt(r.ts), String(r.mmol).replace(".", ","), r.warning || "—"], paged: true },
+  "heart-rate": { label: "Frequência cardíaca", dev: "band", cols: ["Quando", "FC (bpm)"], row: (r) => [fmt(r.ts), r.bpm], paged: true },
+  steps: { label: "Passos", dev: "band", cols: ["Quando", "Passos", "Metros", "Calorias"], row: (r) => [fmt(r.ts), Number(r.steps).toLocaleString("pt-BR"), r.meters ?? "—", r.calories ?? "—"], paged: true },
+  battery: { label: "Bateria", dev: "band", cols: ["Quando", "Nível (%)", "Carregando"], row: (r) => [fmt(r.ts), r.level, r.charging ? "sim" : "não"], paged: true },
+  events: { label: "Eventos", dev: "band", cols: ["Quando", "Tipo", "Detalhes"], row: (r) => [fmt(r.ts), eventTypeLabel(r.type), eventDetails(r.data)], paged: true, filter: (r) => !isBatteryEvent(r.type) },
+};
+let recBand = null, recCgm = null, recStream = "", recCursorTo = null, recAll = [], recReq = 0;
+let patDeviceIds = [];
+// Auto-atualização dos alertas (leve, não reseta a lista de registros) a cada 60 s.
+setInterval(() => {
+  const panel = document.querySelector('[data-panel="patients"]');
+  if (apiKey && panel && !panel.classList.contains("hidden") && selectedPatientId && patDeviceIds.length) {
+    renderPatientAlerts(patDeviceIds);
+  }
+}, 60_000);
+
+function setupRecords(band, cgm) {
+  recBand = band; recCgm = cgm;
+  const avail = Object.entries(REC_STREAMS).filter(([, s]) => (s.dev === "cgm" ? cgm : band));
+  const sel = $("#recStream");
+  sel.replaceChildren(...avail.map(([k, s]) => el("option", { value: k }, s.label)));
+  if (!avail.length) {
+    recStream = ""; $("#recHead").replaceChildren(); $("#recRows").replaceChildren(); $("#recMore").classList.add("hidden");
+    $("#recCount").textContent = ""; $("#recEmpty").textContent = "Sem dispositivos para listar."; $("#recEmpty").classList.remove("hidden");
+    return;
+  }
+  if (!avail.some(([k]) => k === recStream)) recStream = avail[0][0];
+  sel.value = recStream;
+  loadRecords(true);
+}
+
+async function loadRecords(reset) {
+  const cfg = REC_STREAMS[recStream];
+  const dev = cfg && (cfg.dev === "cgm" ? recCgm : recBand);
+  if (!cfg || !dev) return;
+  const req = ++recReq;
+  const windowFrom = Date.now() - Number($("#patRange").value);
+  if (reset) { recAll = []; recCursorTo = null; }
+  $("#recMore").disabled = true;
+  try {
+    const q = new URLSearchParams({ from: String(windowFrom), to: String(recCursorTo ?? Date.now()), limit: "200", order: "desc" });
+    const res = await api("GET", `/v1/devices/${encodeURIComponent(dev.id)}/${recStream}?${q}`);
+    if (req !== recReq || !apiKey) return;
+    let data = res.data || [];
+    if (cfg.filter) data = data.filter(cfg.filter);
+    recAll.push(...data);
+    $("#recHead").replaceChildren(el("tr", {}, ...cfg.cols.map((c) => el("th", {}, c))));
+    $("#recRows").replaceChildren(...recAll.map((r) => el("tr", {}, ...cfg.row(r).map((v) => el("td", {}, v == null ? "—" : String(v))))));
+    $("#recEmpty").textContent = "Sem registros no período.";
+    $("#recEmpty").classList.toggle("hidden", recAll.length > 0);
+    $("#recCount").textContent = `${recAll.length} registro(s)`;
+    recCursorTo = cfg.paged && res.next && res.next.to != null ? res.next.to : null;
+    $("#recMore").classList.toggle("hidden", recCursorTo == null);
+  } catch (e) {
+    if (e.message !== "unauthorized") flash(e.message, "error");
+  } finally {
+    $("#recMore").disabled = false;
+  }
+}
+
+function setPatientEmpty(msg) {
+  ["gluChart", "patHrChart", "patStepsChart"].forEach((id) => $("#" + id).replaceChildren(el("div", { class: "chart-empty" }, msg || "Sem dados.")));
+  ["kGluNow", "kTir", "kGmi", "kHr", "kSteps", "kSleep", "kAlerts"].forEach((id) => $("#" + id).textContent = "—");
+  $("#kGluNowAt").textContent = "sem leituras"; $("#kGluMean").textContent = "glicose média —"; $("#kHrRange").textContent = "sem amostras";
+  $("#tirBar").replaceChildren(); $("#tirLegend").replaceChildren();
+  $("#gluEventRows").replaceChildren(); $("#gluEventsEmpty").classList.remove("hidden");
+  $("#aidexStatus").textContent = "—"; $("#aidexActions").replaceChildren(); $("#gluRules").replaceChildren();
+  $("#recHead").replaceChildren(); $("#recRows").replaceChildren(); $("#recMore").classList.add("hidden");
+  $("#recCount").textContent = ""; $("#recEmpty").textContent = msg || "Sem registros."; $("#recEmpty").classList.remove("hidden");
+  $("#patAlerts").replaceChildren();
+}
+
+async function loadPatients() {
+  const select = $("#patSelect");
+  select.disabled = true;
+  try {
+    const { data } = await api("GET", "/v1/patients");
+    patients = data;
+    if (!data.length) {
+      select.replaceChildren();
+      selectedPatientId = "";
+      $("#patHeader").replaceChildren(el("p", { class: "muted" }, "Nenhum voluntário cadastrado."));
+      $("#patUpdatedAt").textContent = "Sem voluntários";
+      return setPatientEmpty("Nenhum voluntário cadastrado.");
+    }
+    select.replaceChildren(...data.map((p) => el("option", { value: p.id }, `${shortId(p.id)} · ${p.name}`)));
+    if (!data.some((p) => p.id === selectedPatientId)) selectedPatientId = data[0].id;
+    select.value = selectedPatientId;
+    select.disabled = false;
+    await loadPatientData();
+  } catch (e) {
+    if (e.message !== "unauthorized") { const n = $("#patNotice"); n.className = "notice error"; n.classList.remove("hidden"); n.textContent = e.message; }
+  }
+}
+
+function renderPatientHeader(detail, band, cgm, patient) {
+  const chips = [];
+  if (band) {
+    // "Última leitura" = último DADO recebido (não o last_seen, que conta pings/conexão).
+    const lastTs = patient && patient.last_hr_ts;
+    const recent = lastTs && (Date.now() - lastTs < ONLINE_FRESH_MS);
+    chips.push(el("span", { class: `dev-chip ${recent ? "on" : "off"}` },
+      el("span", { class: "dot " + (recent ? "on" : ""), "aria-hidden": "true" }),
+      `Pulseira · última leitura ${lastTs ? fmt(lastTs) : "sem leituras"}`));
+  }
+  if (cgm) {
+    const lastG = patient && patient.last_glucose_ts;
+    chips.push(el("span", { class: "dev-chip off" },
+      el("span", { class: "dot", "aria-hidden": "true" }),
+      `Sensor AiDEX${lastG ? " · última leitura " + fmt(lastG) : " · sem leituras"}`));
+  }
+  if (!band && !cgm) chips.push(el("span", { class: "muted" }, "Sem dispositivos vinculados."));
+  // Evita repetir o nome quando ref == nome; mostra o id curto nesse caso.
+  const idLabel = detail.ref && detail.ref !== detail.name ? detail.ref : shortId(detail.id);
+  $("#patHeader").replaceChildren(
+    el("div", { class: "patient-id" }, el("h2", {}, detail.name), el("span", { class: "mono" }, idLabel)),
+    el("div", { class: "dev-chips" }, ...chips),
+  );
+}
+
+async function renderPatientAlerts(deviceIds) {
+  const box = $("#patAlerts");
+  box.replaceChildren();
+  if (!deviceIds.length) return;
+  try {
+    const { data } = await api("GET", "/v1/alerts?acked=false&order=desc&limit=100");
+    const mine = (data || []).filter((a) => deviceIds.includes(a.device_id));
+    if (!mine.length) return;
+    box.replaceChildren(
+      el("div", { class: "alerts-head" }, el("span", { class: "eyebrow" }, "Alertas não reconhecidos"), el("span", { class: "pill revoked" }, String(mine.length))),
+      ...mine.slice(0, 8).map((a) => el("div", { class: `alert-row sev-${a.severity}` },
+        el("span", { class: "alert-dot", "aria-hidden": "true" }),
+        el("div", { class: "alert-body" }, el("div", {}, a.message), el("div", { class: "muted" }, fmt(a.ts))),
+        el("button", { class: "btn secondary", onclick: guard(async () => { await api("POST", `/v1/alerts/${encodeURIComponent(a.id)}/ack`); loadPatientData(); }) }, "Reconhecer"))),
+    );
+  } catch (e) { if (e.message !== "unauthorized") box.replaceChildren(); }
+}
+
+function renderTir(s) {
+  const bar = $("#tirBar"); const legend = $("#tirLegend");
+  if (!s || !s.samples) { bar.replaceChildren(); legend.replaceChildren(); return; }
+  bar.replaceChildren(...TIR_BANDS.map(([k, , color]) => el("span", { class: "tir-seg", style: `width:${s.tir[k] || 0}%;background:${color}`, title: `${s.tir[k] || 0}%` })));
+  legend.replaceChildren(...TIR_BANDS.map(([k, label, color]) =>
+    el("span", { class: "tir-key" }, el("span", { class: "tir-swatch", style: `background:${color}` }), `${label} ${String(s.tir[k] || 0).replace(".", ",")}%`)));
+}
+
+function renderGlucoseEvents(rows) {
+  $("#gluEventsEmpty").classList.toggle("hidden", rows.length > 0);
+  $("#gluEventRows").replaceChildren(...rows.map((e) => {
+    const details = eventDetails(e.payload);
+    return el("tr", {}, el("td", {}, dateLabel(e.ts)), el("td", {}, gluEventType[e.type] || e.type), el("td", {}, details.length > 120 ? details.slice(0, 120) + "…" : details));
+  }));
+}
+
+async function connectAidex(deviceId) {
+  const r = await api("POST", `/v1/devices/${encodeURIComponent(deviceId)}/aidex/connect`, {});
+  $("#aidexActions").replaceChildren(
+    el("p", { class: "muted" }, "Abra este link para o voluntário autorizar no AiDEX:"),
+    el("a", { href: r.authorize_url, target: "_blank", rel: "noopener", class: "link" }, "Abrir autorização AiDEX ↗"),
+  );
+  flash("Link de autorização gerado.");
+}
+
+function renderAidex(cgm, status) {
+  const box = $("#aidexStatus"); const actions = $("#aidexActions");
+  actions.replaceChildren();
+  if (!cgm) { box.textContent = "Este voluntário não tem sensor de glicemia vinculado."; return; }
+  const st = (status && status.status) || "unlinked";
+  const label = { unlinked: "Não conectado", pending: "Aguardando autorização", linked: "Conectado", revoked: "Revogado — reautorizar", error: "Erro na coleta" }[st] || st;
+  const cls = st === "linked" ? "active" : (st === "error" || st === "revoked") ? "revoked" : "pending";
+  box.replaceChildren(
+    el("span", { class: "status-text " + cls }, label),
+    status && status.last_poll_at ? el("div", { class: "muted" }, `Última coleta: ${fmt(status.last_poll_at)}`) : null,
+    status && status.last_error ? el("div", { class: "muted" }, String(status.last_error)) : null,
+  );
+  if (isManager && st !== "linked") {
+    actions.append(el("button", { class: "btn", onclick: guard(() => connectAidex(cgm.id)) }, st === "unlinked" ? "Conectar AiDEX" : "Gerar novo link"));
+  }
+}
+
+// Tooltip interativo: ao mover o mouse, marca o ponto mais próximo e mostra valor + horário.
+function attachHover(box, svg, pts, fmtPoint) {
+  if (!pts.length) return;
+  box.style.position = "relative";
+  const tip = el("div", { class: "chart-tip hidden" });
+  box.append(tip);
+  const cross = document.createElementNS(NS, "line"); cross.setAttribute("class", "chart-cross"); cross.setAttribute("y1", "20"); cross.setAttribute("y2", "190"); cross.style.display = "none"; svg.append(cross);
+  const marker = document.createElementNS(NS, "circle"); marker.setAttribute("class", "chart-marker"); marker.setAttribute("r", "4.5"); marker.style.display = "none"; svg.append(marker);
+  const move = (ev) => {
+    const rect = box.getBoundingClientRect();
+    const vx = ((ev.clientX - rect.left) / rect.width) * 800;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) { const dd = Math.abs(pts[i].x - vx); if (dd < bd) { bd = dd; best = i; } }
+    const p = pts[best];
+    cross.setAttribute("x1", p.x); cross.setAttribute("x2", p.x); cross.style.display = "";
+    marker.setAttribute("cx", p.x); marker.setAttribute("cy", p.y); marker.style.display = "";
+    tip.innerHTML = fmtPoint(p); tip.classList.remove("hidden");
+    const px = (p.x / 800) * rect.width;
+    tip.style.left = Math.min(Math.max(px - tip.offsetWidth / 2, 2), rect.width - tip.offsetWidth - 2) + "px";
+    tip.style.top = Math.max(2, (p.y / 210) * rect.height - tip.offsetHeight - 8) + "px";
+  };
+  box.addEventListener("pointermove", move);
+  box.addEventListener("pointerleave", () => { tip.classList.add("hidden"); cross.style.display = "none"; marker.style.display = "none"; });
+}
+
+async function renderGluRules(cgm) {
+  const box = $("#gluRules");
+  box.replaceChildren();
+  if (!cgm) return;
+  try {
+    const { data } = await api("GET", `/v1/alert-rules?device_id=${encodeURIComponent(cgm.id)}`);
+    const rules = (data || []).filter((r) => r.metric === "glucose");
+    const opLabel = { lt: "<", lte: "≤", gt: ">", gte: "≥", eq: "=" };
+    box.append(el("p", { class: "eyebrow", style: "margin:12px 0 4px" }, "Alertas de glicemia (mmol/L)"));
+    if (!rules.length) { box.append(el("p", { class: "muted" }, "Sem regras — as padrões são criadas ao conectar o sensor.")); return; }
+    rules.forEach((r) => {
+      const enabled = el("input", { type: "checkbox", title: "Ativa" });
+      enabled.checked = Boolean(r.enabled);
+      const thr = el("input", { type: "number", step: "0.1", class: "glu-thr", value: String(r.threshold) });
+      const row = el("div", { class: "glu-rule" },
+        enabled,
+        el("span", { class: "glu-rule-name" }, `${r.name.replace(/\s*\([^)]*\)\s*$/, "")} ${opLabel[r.op] || r.op}`),
+        thr);
+      if (isManager) {
+        row.append(el("button", { class: "btn secondary", onclick: guard(async () => {
+          await api("PATCH", `/v1/alert-rules/${encodeURIComponent(r.id)}`, { threshold: Number(thr.value), enabled: enabled.checked });
+          flash("Regra atualizada.");
+          renderGluRules(cgm);
+        }) }, "Salvar"));
+      } else { enabled.disabled = true; thr.disabled = true; }
+      box.append(row);
+    });
+  } catch (e) { if (e.message !== "unauthorized") box.replaceChildren(); }
+}
+
+function drawGlucoseChart(box, rows) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg != null ? r.avg : r.mmol) })).filter((p) => Number.isFinite(p.value));
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, "Sem leituras de glicose neste período.")); return; }
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 210"); svg.setAttribute("role", "presentation"); svg.setAttribute("preserveAspectRatio", "none");
+  const dataMin = Math.min(...points.map((p) => p.value)); const dataMax = Math.max(...points.map((p) => p.value));
+  const lo = Math.min(3, Math.floor(dataMin - 1)); const hi = Math.max(14, Math.ceil(dataMax + 1));
+  const y = (v) => 184 - ((v - lo) / Math.max(1, hi - lo)) * 158;
+  const target = document.createElementNS(NS, "rect"); target.setAttribute("x", "0"); target.setAttribute("width", "800"); target.setAttribute("y", String(y(10))); target.setAttribute("height", String(y(3.9) - y(10))); target.setAttribute("class", "glu-target"); svg.append(target);
+  [3.9, 10].forEach((v) => { const line = document.createElementNS(NS, "line"); line.setAttribute("x1", "0"); line.setAttribute("x2", "800"); line.setAttribute("y1", String(y(v))); line.setAttribute("y2", String(y(v))); line.setAttribute("class", "glu-limit"); svg.append(line); });
+  const xy = points.map((p, i) => [points.length === 1 ? 400 : 18 + i * 764 / (points.length - 1), y(p.value)]);
+  const d = xy.map(([x, yy], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yy.toFixed(1)}`).join(" ");
+  const path = document.createElementNS(NS, "path"); path.setAttribute("d", d); path.setAttribute("class", "glu-line"); svg.append(path);
+  xy.forEach(([x, yy], i) => { const c = document.createElementNS(NS, "circle"); c.setAttribute("cx", String(x)); c.setAttribute("cy", String(yy)); c.setAttribute("r", points.length > 48 ? "2" : "3.4"); const v = points[i].value; c.setAttribute("class", "glu-dot" + (v < 3.9 ? " lowdot" : v > 10 ? " highdot" : "")); svg.append(c); });
+  box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${dataMin.toFixed(1).replace(".", ",")}–${dataMax.toFixed(1).replace(".", ",")} mmol/L`, dateLabel(points.at(-1).ts)));
+  const pts = points.map((p, i) => ({ ts: p.ts, value: p.value, x: xy[i][0], y: xy[i][1] }));
+  attachHover(box, svg, pts, (p) => `<b>${p.value.toFixed(1).replace(".", ",")} mmol/L</b><span>${fmt(p.ts)}</span>`);
+}
+
+function drawPatientHr(box, rows, hasBand) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg != null ? r.avg : r.bpm) })).filter((p) => Number.isFinite(p.value));
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de FC neste período." : "Voluntário sem pulseira vinculada.")); return; }
+  const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 210"); svg.setAttribute("role", "presentation"); svg.setAttribute("preserveAspectRatio", "none");
+  const min = Math.min(...points.map((p) => p.value)); const max = Math.max(...points.map((p) => p.value));
+  const pad = Math.max(5, Math.ceil((max - min) * 0.15)); const lo = Math.max(0, min - pad); const hi = max + pad;
+  const xy = points.map((p, i) => [points.length === 1 ? 400 : 18 + i * 764 / (points.length - 1), 184 - ((p.value - lo) / Math.max(1, hi - lo)) * 158]);
+  [26, 78, 130, 184].forEach((yv) => { const line = document.createElementNS(NS, "line"); line.setAttribute("x1", "0"); line.setAttribute("x2", "800"); line.setAttribute("y1", String(yv)); line.setAttribute("y2", String(yv)); line.setAttribute("class", "chart-grid"); svg.append(line); });
+  const d = xy.map(([x, yv], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yv.toFixed(1)}`).join(" ");
+  const area = document.createElementNS(NS, "path"); area.setAttribute("d", `${d} L${xy.at(-1)[0]},184 L${xy[0][0]},184 Z`); area.setAttribute("class", "chart-area"); svg.append(area);
+  const line = document.createElementNS(NS, "path"); line.setAttribute("d", d); line.setAttribute("class", "chart-line"); svg.append(line);
+  box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${Math.min(...points.map((p) => p.value))}–${Math.max(...points.map((p) => p.value))} bpm`, dateLabel(points.at(-1).ts)));
+  const pts = points.map((p, i) => ({ ts: p.ts, value: p.value, x: xy[i][0], y: xy[i][1] }));
+  attachHover(box, svg, pts, (p) => `<b>${p.value} bpm</b><span>${fmt(p.ts)}</span>`);
+}
+
+// Exportação CSV: pagina a série pelo cursor e monta o arquivo no cliente (histórico completo).
+async function fetchAllRows(deviceId, stream, from, to) {
+  const rows = [];
+  let cursorFrom = from;
+  for (let i = 0; i < 400; i++) {
+    const q = new URLSearchParams({ from: String(cursorFrom), to: String(to), limit: "10000", order: "asc" });
+    const res = await api("GET", `/v1/devices/${encodeURIComponent(deviceId)}/${stream}?${q}`);
+    const data = res.data || [];
+    rows.push(...data);
+    if (!res.next || res.next.from == null || !data.length) break;
+    cursorFrom = res.next.from;
+  }
+  return rows;
+}
+function rowsToCsv(rows) {
+  if (!rows.length) return "";
+  const cols = Object.keys(rows[0]);
+  const esc = (v) => {
+    if (v && typeof v === "object") v = JSON.stringify(v);
+    const s = v == null ? "" : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n");
+}
+async function exportStream(deviceId, stream, label, from, to) {
+  flash(`Exportando ${label}…`);
+  const rows = await fetchAllRows(deviceId, stream, from, to);
+  const blob = new Blob([rowsToCsv(rows)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: `${label}-${new Date().toISOString().slice(0, 10)}.csv` });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  flash(`${label}: ${rows.length} registro(s) exportado(s).`);
+}
+
+function drawPatientSteps(box, rows, hasBand) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.steps) })).filter((p) => Number.isFinite(p.value));
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de passos neste período." : "Voluntário sem pulseira vinculada.")); return; }
+  const max = Math.max(1, ...points.map((p) => p.value));
+  const shown = points.slice(-30);
+  const bars = el("div", { class: "chart-bars", role: "list" }, ...shown.map((p) => {
+    const bar = el("div", { class: "chart-bar", role: "listitem", title: `${dateLabel(p.ts)} · ${p.value.toLocaleString("pt-BR")} passos` });
+    bar.append(el("span", { style: `--bar-height:${Math.max(2, p.value / max * 100)}%` }));
+    return bar;
+  }));
+  box.replaceChildren(bars, el("div", { class: "chart-labels" }, dateLabel(shown[0].ts), `${Math.max(...points.map((p) => p.value)).toLocaleString("pt-BR")} passos`, dateLabel(shown.at(-1).ts)));
+}
+
+async function loadPatientData() {
+  const patient = patients.find((p) => p.id === selectedPatientId);
+  if (!patient) return setPatientEmpty("Selecione um voluntário.");
+  const request = ++patRequest;
+  $("#patNotice").classList.add("hidden");
+  $("#patUpdatedAt").textContent = "Atualizando…";
+  const to = Date.now(); const from = to - Number($("#patRange").value); const span = to - from;
+  try {
+    const detail = await api("GET", `/v1/patients/${encodeURIComponent(patient.id)}`);
+    if (request !== patRequest || !apiKey) return;
+    const band = detail.devices.find((d) => d.type === "miband");
+    const cgm = detail.devices.find((d) => d.type === "cgm");
+    renderPatientHeader(detail, band, cgm, patient);
+    patDeviceIds = [band, cgm].filter(Boolean).map((d) => d.id);
+    renderPatientAlerts(patDeviceIds);
+
+    const exp = $("#patExport"); exp.replaceChildren();
+    if (band) {
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(band.id, "heart-rate", `FC-${detail.name}`, from, to)) }, "FC"));
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(band.id, "steps", `Passos-${detail.name}`, from, to)) }, "Passos"));
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(band.id, "events", `Eventos-${detail.name}`, from, to)) }, "Eventos"));
+    }
+    if (cgm) {
+      exp.append(el("button", { class: "btn secondary", onclick: guard(() => exportStream(cgm.id, "glucose", `Glicemia-${detail.name}`, from, to)) }, "Glicemia"));
+    }
+    if (!band && !cgm) exp.replaceChildren(el("span", { class: "muted" }, "Sem dispositivos."));
+
+    setupRecords(band, cgm);
+
+    $("#kGluNow").textContent = patient.last_glucose != null ? mmolLabel(patient.last_glucose) : "—";
+    $("#kGluNowAt").textContent = patient.last_glucose_ts ? dateLabel(patient.last_glucose_ts) : "sem leituras";
+    $("#kAlerts").textContent = patient.unacked_alerts != null ? patient.unacked_alerts : "0";
+
+    const bucket = span <= 86_400_000 ? "15m" : "1h";
+    const win = `from=${from}&to=${to}`;
+    const tasks = {};
+    if (cgm) {
+      tasks.glu = api("GET", `/v1/devices/${cgm.id}/glucose?${win}&bucket=${bucket}&limit=1000`).catch(() => null);
+      tasks.gsum = api("GET", `/v1/devices/${cgm.id}/glucose/summary?${win}`).catch(() => null);
+      tasks.gev = api("GET", `/v1/devices/${cgm.id}/glucose/events?${win}&limit=30&order=desc`).catch(() => null);
+      tasks.aidex = api("GET", `/v1/devices/${cgm.id}/aidex`).catch(() => null);
+    }
+    if (band) {
+      tasks.hr = api("GET", `/v1/devices/${band.id}/heart-rate?${win}&bucket=${bucket}&limit=1000`).catch(() => null);
+      tasks.steps = api("GET", `/v1/devices/${band.id}/steps?${win}&bucket=${span <= 86_400_000 ? "1h" : "1d"}&tz_offset_min=-180&limit=1000`).catch(() => null);
+      tasks.hrsum = api("GET", `/v1/devices/${band.id}/summary?${win}`).catch(() => null);
+    }
+    const keys = Object.keys(tasks);
+    const vals = await Promise.all(keys.map((k) => tasks[k]));
+    if (request !== patRequest || !apiKey) return;
+    const r = Object.fromEntries(keys.map((k, i) => [k, vals[i]]));
+
+    drawGlucoseChart($("#gluChart"), (r.glu && r.glu.data) || []);
+    const s = r.gsum;
+    $("#kTir").textContent = s && s.samples ? `${Math.round(s.tir.in_range)}%` : "—";
+    $("#kGmi").textContent = s && s.gmi_percent != null ? `${String(s.gmi_percent).replace(".", ",")}%` : "—";
+    $("#kGluMean").textContent = s && s.mean_mmol != null ? `glicose média ${mmolLabel(s.mean_mmol)}` : "glicose média —";
+    renderTir(s);
+    renderGlucoseEvents((r.gev && r.gev.data) || []);
+    renderAidex(cgm, r.aidex);
+    renderGluRules(cgm);
+
+    drawPatientHr($("#patHrChart"), (r.hr && r.hr.data) || [], !!band);
+    const h = (r.hrsum && r.hrsum.heart_rate) || {};
+    $("#kHr").textContent = h.samples ? `${h.avg} bpm` : "—";
+    $("#kHrRange").textContent = h.samples ? `mín. ${h.min} · máx. ${h.max}` : "sem amostras";
+
+    drawPatientSteps($("#patStepsChart"), (r.steps && r.steps.data) || [], !!band);
+    const st = (r.hrsum && r.hrsum.steps) || {};
+    $("#kSteps").textContent = st.max_steps == null ? "—" : Number(st.max_steps).toLocaleString("pt-BR");
+    const sl = (r.hrsum && r.hrsum.sleep) || {};
+    $("#kSleep").textContent = sl.total_min ? `${Math.floor(sl.total_min / 60)}h ${String(sl.total_min % 60).padStart(2, "0")}min` : "—";
+
+    $("#patUpdatedAt").textContent = `Atualizado ${fmt(Date.now())}`;
+  } catch (e) {
+    if (e.message !== "unauthorized") { const n = $("#patNotice"); n.className = "notice error"; n.classList.remove("hidden"); n.textContent = e.message; setPatientEmpty("Não foi possível carregar os dados."); }
+  }
+}
+
+$("#recStream").addEventListener("change", (e) => { recStream = e.target.value; loadRecords(true); });
+$("#recMore").addEventListener("click", () => loadRecords(false));
+$("#patReload").addEventListener("click", guard(loadPatientData));
+$("#patSelect").addEventListener("change", (e) => { selectedPatientId = e.target.value; guard(loadPatientData)(); });
+$("#patRange").addEventListener("change", guard(loadPatientData));
 
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 start();

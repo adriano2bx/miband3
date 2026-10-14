@@ -32,7 +32,16 @@ export async function authenticate(req: Request, env: Env): Promise<Principal | 
     if (!session || session.revoked_at || session.disabled_at || session.expires_at <= now || session.max_expires_at <= now || !technicianScopes.includes("panel_read")) return null;
     const expiresAt = Math.min(now + TECH_SESSION_IDLE_MS, session.max_expires_at);
     env.DB.prepare("UPDATE panel_sessions SET expires_at = ? WHERE id = ?").bind(expiresAt, session.id).run().catch(() => {});
-    return { id: `tech:${session.technician_id}`, scopes: new Set(["read"]), deviceIds: null };
+    // Conta atrelada a pacientes (seguidor = 1, técnico responsável = vários): enxerga
+    // os devices de todos eles. Sem pacientes atrelados = conta ampla (gestão/staff).
+    let deviceIds: string[] | null = null;
+    const pats = await env.DB.prepare("SELECT patient_id FROM technician_patients WHERE technician_id = ?").bind(session.technician_id).all<{ patient_id: string }>();
+    if (pats.results.length) {
+      const ids = pats.results.map((r) => r.patient_id);
+      const devs = await env.DB.prepare(`SELECT id FROM devices WHERE archived_at IS NULL AND patient_id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all<{ id: string }>();
+      deviceIds = devs.results.map((r) => r.id);
+    }
+    return { id: `tech:${session.technician_id}`, scopes: new Set(["read"]), deviceIds };
   }
   if (!token.startsWith("mbk_")) return null;
 

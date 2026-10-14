@@ -10,6 +10,9 @@ import { deliverOne, WEBHOOK_EVENTS } from "./webhooks";
 import { openapi } from "./openapi";
 import { participantApi } from "./participant-api";
 import { effectiveConfig } from "./participants";
+import * as aidex from "./aidex";
+import type { AidexEnv } from "./aidex";
+import { audit } from "./audit";
 
 export const api = new Hono<AppEnv>();
 
@@ -75,6 +78,33 @@ async function loadDevice(c: Context<AppEnv>, id: string) {
   return c.env.DB.prepare("SELECT * FROM devices WHERE id = ?").bind(id).first<DeviceRow>();
 }
 
+interface PatientRow {
+  id: string;
+  name: string;
+  ref: string | null;
+  notes: string | null;
+  metadata: string;
+  created_at: number;
+  updated_at: number;
+  archived_at: number | null;
+}
+
+const serializePatient = (p: PatientRow, extra: Record<string, unknown> = {}) => ({
+  id: p.id,
+  name: p.name,
+  ref: p.ref,
+  notes: p.notes,
+  metadata: parseJson(p.metadata, {}),
+  created_at: p.created_at,
+  updated_at: p.updated_at,
+  archived_at: p.archived_at,
+  ...extra,
+});
+
+function loadPatient(c: Context<AppEnv>, pid: string) {
+  return c.env.DB.prepare("SELECT * FROM patients WHERE id = ? AND archived_at IS NULL").bind(pid).first<PatientRow>();
+}
+
 interface DeviceRow {
   id: string;
   name: string;
@@ -94,11 +124,15 @@ interface DeviceRow {
   config: string;
   config_version: number;
   config_updated_at: number | null;
+  type: string;
+  patient_id: string | null;
 }
 
 const serializeDevice = (d: DeviceRow) => ({
   id: d.id,
   name: d.name,
+  type: d.type ?? "miband",
+  patient_id: d.patient_id ?? null,
   patient_ref: d.patient_ref,
   notes: d.notes,
   metadata: parseJson(d.metadata, {}),
@@ -186,6 +220,12 @@ const DeviceInput = z.object({
   patient_ref: z.string().max(120).nullish(),
   notes: z.string().max(2000).nullish(),
   metadata: z.record(z.unknown()).optional(),
+  // 'miband' (pulseira, padrão) ou 'cgm' (sensor de glicemia AiDEX). Mesmo
+  // patient_id agrupa os devices de um paciente (pode ter um de cada tipo).
+  type: z.enum(["miband", "cgm"]).optional(),
+  // Vincula o device a um paciente (entidade). Se informado, patient_ref é
+  // preenchido a partir do paciente para exibição.
+  patient_id: z.string().max(40).nullish(),
 });
 
 api.post("/v1/devices", requireAuth("manage"), async (c) => {
@@ -194,10 +234,16 @@ api.post("/v1/devices", requireAuth("manage"), async (c) => {
   const id = newId("dev");
   const token = randomToken("mbd");
   const now = Date.now();
+  let patientRef = b.data.patient_ref ?? null;
+  if (b.data.patient_id) {
+    const pat = await loadPatient(c, b.data.patient_id);
+    if (!pat) return c.json({ error: "not_found", message: "Paciente não encontrado." }, 404);
+    patientRef = patientRef ?? pat.ref ?? pat.name;
+  }
   await c.env.DB.prepare(
-    "INSERT INTO devices (id, name, patient_ref, notes, metadata, token_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO devices (id, name, patient_ref, patient_id, notes, metadata, token_hash, created_at, updated_at, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   )
-    .bind(id, b.data.name, b.data.patient_ref ?? null, b.data.notes ?? null, JSON.stringify(b.data.metadata ?? {}), await sha256Hex(token), now, now)
+    .bind(id, b.data.name, patientRef, b.data.patient_id ?? null, b.data.notes ?? null, JSON.stringify(b.data.metadata ?? {}), await sha256Hex(token), now, now, b.data.type ?? "miband")
     .run();
   const device = await loadDevice(c, id);
   // O token só é exibido agora; configure-o no app (campo "Token do dispositivo").
@@ -234,10 +280,19 @@ api.patch("/v1/devices/:id", deviceRoute("manage"), async (c) => {
   if (!b.ok) return b.res;
   const id = c.req.param("id")!;
   const cur = (await loadDevice(c, id))!;
-  await c.env.DB.prepare("UPDATE devices SET name = ?, patient_ref = ?, notes = ?, metadata = ?, updated_at = ? WHERE id = ?")
+  let patientId = b.data.patient_id === undefined ? cur.patient_id : b.data.patient_id;
+  let patientRef = b.data.patient_ref === undefined ? cur.patient_ref : b.data.patient_ref;
+  if (b.data.patient_id) {
+    const pat = await loadPatient(c, b.data.patient_id);
+    if (!pat) return c.json({ error: "not_found", message: "Paciente não encontrado." }, 404);
+    if (b.data.patient_ref === undefined) patientRef = pat.ref ?? pat.name;
+  }
+  if (b.data.patient_id === null) patientId = null;
+  await c.env.DB.prepare("UPDATE devices SET name = ?, patient_ref = ?, patient_id = ?, notes = ?, metadata = ?, updated_at = ? WHERE id = ?")
     .bind(
       b.data.name ?? cur.name,
-      b.data.patient_ref === undefined ? cur.patient_ref : b.data.patient_ref,
+      patientRef,
+      patientId,
       b.data.notes === undefined ? cur.notes : b.data.notes,
       b.data.metadata ? JSON.stringify(b.data.metadata) : cur.metadata,
       Date.now(),
@@ -263,7 +318,7 @@ api.delete("/v1/devices/:id", deviceRoute("manage"), async (c) => {
     if (!c.get("principal").scopes.has("admin")) return c.json({ error: "forbidden", message: "purge exige o escopo 'admin'." }, 403);
     const db = c.env.DB;
     await db.batch(
-      ["heart_rate", "steps", "battery", "events", "activity", "commands", "alerts"].map((t) => db.prepare(`DELETE FROM ${t} WHERE device_id = ?`).bind(id))
+      ["heart_rate", "steps", "battery", "events", "activity", "commands", "alerts", "glucose", "glucose_events", "aidex_links"].map((t) => db.prepare(`DELETE FROM ${t} WHERE device_id = ?`).bind(id))
         .concat(db.prepare("DELETE FROM alert_rules WHERE device_id = ?").bind(id), db.prepare("DELETE FROM devices WHERE id = ?").bind(id)),
     );
     return c.json({ deleted: id, purged: true });
@@ -280,6 +335,116 @@ api.get("/v1/devices/:id/status", deviceRoute("read"), async (c) => {
   const pending = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM commands WHERE device_id = ? AND status IN ('queued','sent')").bind(id).first<{ n: number }>();
   const open = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM alerts WHERE device_id = ? AND acked_at IS NULL").bind(id).first<{ n: number }>();
   return c.json({ ...snap, t: undefined, pending_commands: pending?.n ?? 0, unacked_alerts: open?.n ?? 0 });
+});
+
+// ====================================================================== pacientes
+
+const PatientInput = z.object({
+  name: z.string().min(1).max(120),
+  ref: z.string().max(120).nullish(),
+  notes: z.string().max(2000).nullish(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+/** patient_ids visíveis para a chave (null = todos). Deriva dos devices permitidos. */
+async function visiblePatientIds(c: Context<AppEnv>): Promise<string[] | null> {
+  const p = c.get("principal");
+  if (!p.deviceIds) return null;
+  if (!p.deviceIds.length) return [];
+  const { results } = await c.env.DB.prepare(
+    `SELECT DISTINCT patient_id FROM devices WHERE patient_id IS NOT NULL AND id IN (${p.deviceIds.map(() => "?").join(",")})`,
+  ).bind(...p.deviceIds).all<{ patient_id: string }>();
+  return results.map((r) => r.patient_id);
+}
+
+api.post("/v1/patients", requireAuth("manage"), async (c) => {
+  if (c.get("principal").deviceIds) return c.json({ error: "forbidden", message: "Chaves restritas não criam pacientes." }, 403);
+  const b = await body(c, PatientInput);
+  if (!b.ok) return b.res;
+  const id = newId("pat");
+  const now = Date.now();
+  await c.env.DB.prepare("INSERT INTO patients (id, name, ref, notes, metadata, created_at, updated_at) VALUES (?,?,?,?,?,?,?)")
+    .bind(id, b.data.name, b.data.ref ?? null, b.data.notes ?? null, JSON.stringify(b.data.metadata ?? {}), now, now).run();
+  return c.json(serializePatient((await c.env.DB.prepare("SELECT * FROM patients WHERE id = ?").bind(id).first<PatientRow>())!, { devices: [] }), 201);
+});
+
+api.get("/v1/patients", requireAuth("read"), async (c) => {
+  const visible = await visiblePatientIds(c);
+  const where: string[] = [];
+  const args: unknown[] = [];
+  if (c.req.query("archived") !== "true") where.push("p.archived_at IS NULL");
+  if (visible) {
+    if (!visible.length) return c.json({ data: [], count: 0 });
+    where.push(`p.id IN (${visible.map(() => "?").join(",")})`);
+    args.push(...visible);
+  }
+  const { results } = await c.env.DB.prepare(
+    `SELECT p.*,
+       (SELECT COUNT(*) FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL) AS device_count,
+       (SELECT COUNT(*) FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL AND d.online = 1) AS online_count,
+       EXISTS(SELECT 1 FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL AND d.type = 'miband') AS has_band,
+       EXISTS(SELECT 1 FROM devices d WHERE d.patient_id = p.id AND d.archived_at IS NULL AND d.type = 'cgm') AS has_cgm,
+       (SELECT hr.bpm FROM heart_rate hr JOIN devices d ON d.id = hr.device_id WHERE d.patient_id = p.id ORDER BY hr.ts DESC LIMIT 1) AS last_hr,
+       (SELECT hr.ts  FROM heart_rate hr JOIN devices d ON d.id = hr.device_id WHERE d.patient_id = p.id ORDER BY hr.ts DESC LIMIT 1) AS last_hr_ts,
+       (SELECT g.mmol FROM glucose g JOIN devices d ON d.id = g.device_id WHERE d.patient_id = p.id ORDER BY g.ts DESC LIMIT 1) AS last_glucose,
+       (SELECT g.ts   FROM glucose g JOIN devices d ON d.id = g.device_id WHERE d.patient_id = p.id ORDER BY g.ts DESC LIMIT 1) AS last_glucose_ts,
+       (SELECT COUNT(*) FROM alerts a JOIN devices d ON d.id = a.device_id WHERE d.patient_id = p.id AND a.acked_at IS NULL) AS unacked_alerts
+     FROM patients p ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY p.name LIMIT 1000`,
+  ).bind(...args).all<PatientRow & Record<string, number | null>>();
+  return c.json({
+    data: results.map((p) => serializePatient(p, {
+      device_count: p.device_count,
+      online_count: p.online_count,
+      has_band: Boolean(p.has_band),
+      has_cgm: Boolean(p.has_cgm),
+      last_hr: p.last_hr,
+      last_hr_ts: p.last_hr_ts,
+      last_glucose: p.last_glucose,
+      last_glucose_ts: p.last_glucose_ts,
+      unacked_alerts: p.unacked_alerts,
+    })),
+    count: results.length,
+  });
+});
+
+api.get("/v1/patients/:pid", requireAuth("read"), async (c) => {
+  const pid = c.req.param("pid")!;
+  const visible = await visiblePatientIds(c);
+  if (visible && !visible.includes(pid)) return c.json({ error: "forbidden" }, 403);
+  const pat = await c.env.DB.prepare("SELECT * FROM patients WHERE id = ?").bind(pid).first<PatientRow>();
+  if (!pat) return c.json({ error: "not_found" }, 404);
+  const { results } = await c.env.DB.prepare("SELECT * FROM devices WHERE patient_id = ? AND archived_at IS NULL ORDER BY type").bind(pid).all<DeviceRow>();
+  await audit(c.env, { principal: c.get("principal").id, action: "patient.view", patient_id: pid });
+  return c.json(serializePatient(pat, { devices: results.map(serializeDevice) }));
+});
+
+api.patch("/v1/patients/:pid", requireAuth("manage"), async (c) => {
+  if (c.get("principal").deviceIds) return c.json({ error: "forbidden" }, 403);
+  const pid = c.req.param("pid")!;
+  const cur = await c.env.DB.prepare("SELECT * FROM patients WHERE id = ? AND archived_at IS NULL").bind(pid).first<PatientRow>();
+  if (!cur) return c.json({ error: "not_found" }, 404);
+  const b = await body(c, PatientInput.partial());
+  if (!b.ok) return b.res;
+  await c.env.DB.prepare("UPDATE patients SET name = ?, ref = ?, notes = ?, metadata = ?, updated_at = ? WHERE id = ?")
+    .bind(
+      b.data.name ?? cur.name,
+      b.data.ref === undefined ? cur.ref : b.data.ref,
+      b.data.notes === undefined ? cur.notes : b.data.notes,
+      b.data.metadata ? JSON.stringify(b.data.metadata) : cur.metadata,
+      Date.now(), pid,
+    ).run();
+  return c.json(serializePatient((await c.env.DB.prepare("SELECT * FROM patients WHERE id = ?").bind(pid).first<PatientRow>())!));
+});
+
+api.delete("/v1/patients/:pid", requireAuth("manage"), async (c) => {
+  if (c.get("principal").deviceIds) return c.json({ error: "forbidden" }, 403);
+  const pid = c.req.param("pid")!;
+  const now = Date.now();
+  const res = await c.env.DB.prepare("UPDATE patients SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL").bind(now, now, pid).run();
+  if (!res.meta.changes) return c.json({ error: "not_found" }, 404);
+  // Desvincula os devices (continuam existindo, sem paciente).
+  await c.env.DB.prepare("UPDATE devices SET patient_id = NULL, updated_at = ? WHERE patient_id = ?").bind(now, pid).run();
+  return c.json({ archived: pid });
 });
 
 /** Visão geral de todos os pacientes (último valor de cada pulseira) em uma única chamada. */
@@ -414,6 +579,134 @@ api.get("/v1/devices/:id/summary", deviceRoute("read"), async (c) => {
   });
 });
 
+// ====================================================================== glicemia (AiDEX)
+
+function pickAidexEnv(c: Context<AppEnv>, value?: unknown): AidexEnv {
+  const v = (value ?? c.env.AIDEX_ENV ?? "sandbox") as string;
+  return v === "production" ? "production" : "sandbox";
+}
+
+/** Estado do vínculo AiDEX da pulseira (nunca expõe tokens). */
+api.get("/v1/devices/:id/aidex", deviceRoute("read"), async (c) => {
+  const link = await aidex.getLink(c.env, c.req.param("id")!);
+  if (!link) return c.json({ status: "unlinked" });
+  return c.json({
+    status: link.status,
+    env: link.env,
+    cursor_at: link.cursor_at,
+    last_poll_at: link.last_poll_at,
+    last_error: link.last_error,
+    updated_at: link.updated_at,
+  });
+});
+
+/** Inicia o vínculo: devolve a URL oficial de autorização para o paciente abrir e autorizar. */
+api.post("/v1/devices/:id/aidex/connect", deviceRoute("manage"), async (c) => {
+  if (!c.env.AIDEX_CLIENT_ID) return c.json({ error: "not_configured", message: "AIDEX_CLIENT_ID não configurado." }, 503);
+  const id = c.req.param("id")!;
+  const b = await body(c, z.object({ env: z.enum(["sandbox", "production"]).optional() }));
+  if (!b.ok) return b.res;
+  const env = pickAidexEnv(c, b.data.env);
+  const state = randomToken("st");
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO aidex_links (device_id, env, status, state, created_at, updated_at)
+     VALUES (?, ?, 'pending', ?, ?, ?)
+     ON CONFLICT(device_id) DO UPDATE SET env = excluded.env, status = 'pending', state = excluded.state, updated_at = excluded.updated_at`,
+  ).bind(id, env, state, now, now).run();
+  // Um device com vínculo AiDEX é, por definição, um sensor CGM.
+  await c.env.DB.prepare("UPDATE devices SET type = 'cgm', updated_at = ? WHERE id = ?").bind(now, id).run();
+  // Regras de alerta de glicemia padrão (hipo/hiper), uma vez por sensor.
+  await aidex.seedDefaultGlucoseRules(c.env, id).catch(() => {});
+  return c.json({ authorize_url: aidex.authorizeUrl(c.env, env, state), env });
+});
+
+/**
+ * Callback do OAuth (público: é o redirect do navegador do paciente após autorizar).
+ * Validado pelo `state`. Registre este endpoint como redirect_uri no Console da AiDEX.
+ */
+api.get("/v1/aidex/callback", async (c) => {
+  const { code, state, error } = c.req.query();
+  const esc = (s: string) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch] as string));
+  const page = (msg: string) => c.html(`<!doctype html><meta charset=utf-8><title>BIOSENSE · AiDEX</title><body style="font-family:system-ui;padding:2rem;max-width:30rem;margin:auto"><h2>BIOSENSE × AiDEX</h2><p>${msg}</p></body>`);
+  if (!state) return page("Requisição inválida: faltou o parâmetro <code>state</code>.");
+  const row = await c.env.DB.prepare("SELECT device_id, env FROM aidex_links WHERE state = ?").bind(state).first<{ device_id: string; env: AidexEnv }>();
+  if (!row) return page("Autorização não reconhecida (state expirado ou já usado).");
+  if (error) {
+    await c.env.DB.prepare("UPDATE aidex_links SET status='error', last_error=?, state=NULL, updated_at=? WHERE device_id=?")
+      .bind(`authorize: ${error}`, Date.now(), row.device_id).run();
+    return page(`A autorização foi negada ou falhou (<code>${esc(error)}</code>). Você pode fechar esta janela.`);
+  }
+  if (!code) return page("Requisição inválida: faltou o parâmetro <code>code</code>.");
+  try {
+    await aidex.exchangeCode(c.env, row.device_id, row.env, code);
+    await c.env.DB.prepare("UPDATE aidex_links SET state=NULL, updated_at=? WHERE device_id=?").bind(Date.now(), row.device_id).run();
+    const link2 = (await aidex.getLink(c.env, row.device_id))!;
+    c.executionCtx.waitUntil(aidex.pollDevice(c.env, link2).catch(() => {}));
+    return page("Conta AiDEX conectada com sucesso. A coleta de glicemia começou. Você pode fechar esta janela.");
+  } catch (e) {
+    await c.env.DB.prepare("UPDATE aidex_links SET status='error', last_error=?, updated_at=? WHERE device_id=?")
+      .bind(e instanceof Error ? e.message : String(e), Date.now(), row.device_id).run();
+    return page("Não foi possível concluir a conexão. Tente novamente mais tarde.");
+  }
+});
+
+/** Dispara uma coleta imediata (além do cron). */
+api.post("/v1/devices/:id/aidex/poll", deviceRoute("manage"), async (c) => {
+  const link = await aidex.getLink(c.env, c.req.param("id")!);
+  if (!link || link.status === "pending") return c.json({ error: "not_linked", message: "Pulseira sem vínculo AiDEX ativo." }, 409);
+  try {
+    const r = await aidex.pollDevice(c.env, link);
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json({ error: "poll_failed", message: e instanceof Error ? e.message : String(e) }, 502);
+  }
+});
+
+/** Desfaz o vínculo localmente. (A revogação definitiva é feita pelo paciente no app AiDEX.) */
+api.delete("/v1/devices/:id/aidex", deviceRoute("manage"), async (c) => {
+  await c.env.DB.prepare("DELETE FROM aidex_links WHERE device_id = ?").bind(c.req.param("id")!).run();
+  return c.body(null, 204);
+});
+
+api.get("/v1/devices/:id/glucose", deviceRoute("read"), async (c) => {
+  const r = range(c);
+  if (isResponse(r)) return r;
+  const id = c.req.param("id")!;
+  const bucket = c.req.query("bucket");
+  if (bucket) {
+    const size = BUCKETS[bucket];
+    if (!size) return c.json({ error: "bad_request", message: `bucket deve ser um de: ${Object.keys(BUCKETS).join(", ")}` }, 400);
+    const { results } = await c.env.DB.prepare(
+      `SELECT (ts / ${size}) * ${size} AS ts, ROUND(AVG(mmol), 2) AS avg, ROUND(MIN(mmol), 2) AS min, ROUND(MAX(mmol), 2) AS max, COUNT(*) AS samples
+       FROM glucose WHERE device_id = ? AND ts BETWEEN ? AND ? GROUP BY ts / ${size} ORDER BY ts ${r.order} LIMIT ?`,
+    ).bind(id, r.from, r.to, r.limit).all();
+    return series(c, results as Record<string, unknown>[], r, { bucket, unit: "mmol/L" });
+  }
+  const { results } = await c.env.DB.prepare("SELECT ts, mmol, warning FROM glucose WHERE device_id = ? AND ts BETWEEN ? AND ? ORDER BY ts " + r.order + " LIMIT ?")
+    .bind(id, r.from, r.to, r.limit).all();
+  return series(c, results as Record<string, unknown>[], r, { unit: "mmol/L" });
+});
+
+api.get("/v1/devices/:id/glucose/summary", deviceRoute("read"), async (c) => {
+  const r = range(c, 14 * 86400_000); // janela padrão de 14 dias (padrão clínico de relatório CGM)
+  if (isResponse(r)) return r;
+  const { results } = await c.env.DB.prepare("SELECT ts, mmol FROM glucose WHERE device_id = ? AND ts BETWEEN ? AND ? ORDER BY ts ASC")
+    .bind(c.req.param("id")!, r.from, r.to).all<{ ts: number; mmol: number }>();
+  return c.json({ window_from: r.from, window_to: r.to, unit: "mmol/L", ...aidex.summarize(results) });
+});
+
+api.get("/v1/devices/:id/glucose/events", deviceRoute("read"), async (c) => {
+  const r = range(c, 7 * 86400_000);
+  if (isResponse(r)) return r;
+  const type = c.req.query("type");
+  const base = "SELECT type, ext_id, ts, payload FROM glucose_events WHERE device_id = ? AND ts BETWEEN ? AND ?";
+  const q = type ? base + " AND type = ? ORDER BY ts " + r.order + " LIMIT ?" : base + " ORDER BY ts " + r.order + " LIMIT ?";
+  const binds = type ? [c.req.param("id")!, r.from, r.to, type, r.limit] : [c.req.param("id")!, r.from, r.to, r.limit];
+  const { results } = await c.env.DB.prepare(q).bind(...binds).all<Record<string, unknown>>();
+  return c.json({ data: results.map((e) => ({ ...e, payload: parseJson(e.payload as string, {}) })), count: results.length });
+});
+
 // ====================================================================== comandos
 
 api.post("/v1/devices/:id/commands", deviceRoute("command"), async (c) => {
@@ -461,7 +754,7 @@ api.delete("/v1/devices/:id/commands/:cid", deviceRoute("command"), async (c) =>
 const RuleInput = z.object({
   device_id: z.string().nullish(),
   name: z.string().min(1).max(120),
-  metric: z.enum(["heart_rate", "battery", "offline", "event"]),
+  metric: z.enum(["heart_rate", "battery", "offline", "event", "glucose"]),
   op: z.enum(["gt", "gte", "lt", "lte", "eq"]).default("gt"),
   threshold: z.number().nullish(),
   match: z.string().max(64).nullish(),
@@ -554,12 +847,14 @@ api.get("/v1/alerts", requireAuth("read"), async (c) => {
   return series(c, results as Record<string, unknown>[], r);
 });
 
-api.post("/v1/alerts/:aid/ack", requireAuth("command"), async (c) => {
+// Reconhecer alerta exige apenas acesso de leitura ao device (o seguidor acompanha e reconhece).
+api.post("/v1/alerts/:aid/ack", requireAuth("read"), async (c) => {
   const aid = c.req.param("aid")!;
   const row = await c.env.DB.prepare("SELECT device_id FROM alerts WHERE id = ?").bind(aid).first<{ device_id: string }>();
   if (!row) return c.json({ error: "not_found" }, 404);
   if (!canAccess(c.get("principal"), row.device_id)) return c.json({ error: "forbidden" }, 403);
   await c.env.DB.prepare("UPDATE alerts SET acked_at = COALESCE(acked_at, ?), acked_by = COALESCE(acked_by, ?) WHERE id = ?").bind(Date.now(), c.get("principal").id, aid).run();
+  await audit(c.env, { principal: c.get("principal").id, action: "alert.ack", device_id: row.device_id, detail: aid });
   return c.json((await c.env.DB.prepare("SELECT * FROM alerts WHERE id = ?").bind(aid).first())!);
 });
 
@@ -655,6 +950,20 @@ api.get("/v1/me", async (c) => {
   const p = await authenticate(c.req.raw, c.env);
   if (!p) return c.json({ error: "unauthorized" }, 401);
   return c.json({ id: p.id, scopes: [...p.scopes], device_ids: p.deviceIds });
+});
+
+/** Trilha de auditoria de acesso aos dados (LGPD/clínico). */
+api.get("/v1/audit", requireAuth("admin"), async (c) => {
+  const q = c.req.query();
+  const r = range(c, 30 * 86400_000);
+  if (isResponse(r)) return r;
+  const where = ["ts BETWEEN ? AND ?"];
+  const args: unknown[] = [r.from, r.to];
+  if (q.patient_id) { where.push("patient_id = ?"); args.push(q.patient_id); }
+  if (q.action) { where.push("action = ?"); args.push(q.action); }
+  if (q.principal) { where.push("principal = ?"); args.push(q.principal); }
+  const { results } = await c.env.DB.prepare(`SELECT * FROM audit_log WHERE ${where.join(" AND ")} ORDER BY ts DESC LIMIT ?`).bind(...args, r.limit).all();
+  return c.json({ data: results, count: results.length });
 });
 
 api.notFound((c) => c.json({ error: "not_found", message: "Rota inexistente. Veja /v1/openapi.json." }, 404));

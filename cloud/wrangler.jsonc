@@ -34,11 +34,20 @@
   // Painel de administração (public/admin). As rotas /v1/* sempre vão para o Worker.
   "assets": { "directory": "./public", "run_worker_first": ["/v1/*"] },
 
-  // Limpeza diária de dados antigos (RETENTION_DAYS).
-  "triggers": { "crons": ["17 3 * * *"] },
+  // Um único cron por causa do limite de 5 crons/conta do plano Free da Cloudflare.
+  // A cada 15 min dispara a coleta da glicemia AiDEX; a limpeza diária
+  // (RETENTION_DAYS) roda uma vez por dia na execução das 03h UTC (ver index.ts).
+  "triggers": { "crons": ["*/15 * * * *"] },
 
   "vars": {
-    "RETENTION_DAYS": "365"
+    "RETENTION_DAYS": "365",
+    // Módulo AiDEX (glicemia). Produção só após "Upgrade App" aprovado no Console AiDEX.
+    "AIDEX_ENV": "sandbox",
+    "AIDEX_BACKFILL_DAYS": "90"
+    // Defina também AIDEX_CLIENT_ID aqui (não é segredo) após criar o app no Console AiDEX,
+    // com redirect_uri = https://biosense.deltabots.com.br/v1/aidex/callback
   }
-  // Segredo obrigatório:  npx wrangler secret put ADMIN_API_KEY
+  // Segredos obrigatórios:
+  //   npx wrangler secret put ADMIN_API_KEY
+  //   npx wrangler secret put AIDEX_CLIENT_SECRET
 }

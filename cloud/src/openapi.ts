@@ -31,6 +31,24 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/me": { get: { summary: "Escopos e pulseiras da chave usada", tag: "Geral", auth: "read", res: "Me" } },
   "/v1/openapi.json": { get: { summary: "Esta especificação", tag: "Geral", auth: "public" } },
 
+  // ------------------------------------------------------------------ pacientes
+  "/v1/patients": {
+    get: { summary: "Listar pacientes", description: "Um paciente agrupa os devices de uma pessoa (pulseira e/ou CGM). Inclui device_count.", tag: "Pacientes", auth: "read", params: ["archived"], res: "Patient[]" },
+    post: { summary: "Criar paciente", tag: "Pacientes", auth: "manage", body: "PatientInput", res: "PatientWithDevices", status: 201 },
+  },
+  "/v1/patients/{pid}": {
+    get: { summary: "Detalhes do paciente (com seus devices)", tag: "Pacientes", auth: "read", res: "PatientWithDevices" },
+    patch: { summary: "Alterar nome, referência, notas e metadados", tag: "Pacientes", auth: "manage", body: "PatientInput", res: "Patient" },
+    delete: { summary: "Arquivar paciente", description: "Arquiva o paciente e desvincula os devices (que continuam existindo).", tag: "Pacientes", auth: "manage", res: "Archived" },
+  },
+  "/v1/patients/{pid}/followers": {
+    get: { summary: "Seguidores do paciente", description: "Contas de painel só-leitura amarradas ao paciente.", tag: "Pacientes", auth: "manage", res: "Follower[]" },
+    post: { summary: "Criar seguidor (acesso só-leitura ao paciente)", description: "Entra no painel pelo login de técnico (credencial + senha) e só enxerga os devices deste paciente.", tag: "Pacientes", auth: "manage", body: "FollowerInput", res: "FollowerCreated", status: 201 },
+  },
+  "/v1/patients/{pid}/followers/{tid}": {
+    delete: { summary: "Remover o seguidor deste paciente", description: "Desatrela este paciente; se a conta não tiver mais nenhum paciente, é desativada.", tag: "Pacientes", auth: "manage", res: "FollowerRemoved" },
+  },
+
   // ------------------------------------------------------------------ tempo real
   "/v1/overview": { get: { summary: "Último valor de todos os participantes", description: "Uma linha por instalação com última FC, bateria, passos e alertas pendentes.", tag: "Tempo real", auth: "read", res: "Overview[]" } },
   "/v1/devices/{id}/status": { get: { summary: "Estado ao vivo de uma instalação", tag: "Tempo real", auth: "read", res: "LiveStatus" } },
@@ -62,6 +80,18 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/devices/{id}/activity": { get: { summary: "Histórico por minuto baixado da pulseira", tag: "Histórico", auth: "read", params: [...series, "format"], res: "Activity[]", csv: true } },
   "/v1/devices/{id}/sleep": { get: { summary: "Sessões de sono (classificação provisória)", tag: "Histórico", auth: "read", params: ["from", "to"], res: "SleepResult" } },
   "/v1/devices/{id}/summary": { get: { summary: "Resumo do período", tag: "Histórico", auth: "read", params: ["from", "to"], res: "Summary" } },
+
+  // ------------------------------------------------------------------ glicemia (AiDEX)
+  "/v1/devices/{id}/aidex": {
+    get: { summary: "Estado do vínculo AiDEX", description: "Nunca expõe tokens. `status`: unlinked | pending | linked | revoked | error.", tag: "Glicemia (AiDEX)", auth: "read", res: "AidexStatus" },
+    delete: { summary: "Desfazer o vínculo localmente", description: "A revogação definitiva é feita pelo paciente no app AiDEX.", tag: "Glicemia (AiDEX)", auth: "manage" },
+  },
+  "/v1/devices/{id}/aidex/connect": { post: { summary: "Iniciar autorização AiDEX", description: "Devolve `authorize_url`: o paciente abre, faz login na AiDEX e autoriza o acesso somente-leitura.", tag: "Glicemia (AiDEX)", auth: "manage", body: "AidexConnectInput", res: "AidexConnect" } },
+  "/v1/aidex/callback": { get: { summary: "Callback OAuth (redirect do paciente)", description: "Público, validado pelo `state`. Registre esta URL como redirect_uri no Console da AiDEX. Responde HTML.", tag: "Glicemia (AiDEX)", auth: "public" } },
+  "/v1/devices/{id}/aidex/poll": { post: { summary: "Coletar glicemia agora", tag: "Glicemia (AiDEX)", auth: "manage", res: "AidexPoll", status: 202 } },
+  "/v1/devices/{id}/glucose": { get: { summary: "Glicemia do sensor (mmol/L)", description: "Leituras brutas, ou agregadas com `bucket` (média, mínimo e máximo por intervalo).", tag: "Glicemia (AiDEX)", auth: "read", params: [...series, "bucket", "format"], res: "Glucose[]", csv: true } },
+  "/v1/devices/{id}/glucose/summary": { get: { summary: "Métricas de CGM (TIR, média, GMI, CV)", description: "Janela padrão de 14 dias. Faixas de tempo-no-alvo em mmol/L: <3,0 / 3,0–3,9 / 3,9–10,0 / 10,0–13,9 / >13,9.", tag: "Glicemia (AiDEX)", auth: "read", params: ["from", "to"], res: "GlucoseSummary" } },
+  "/v1/devices/{id}/glucose/events": { get: { summary: "Eventos (refeição, exercício, medicação, insulina, outros)", tag: "Glicemia (AiDEX)", auth: "read", params: [...series, "type"], res: "GlucoseEvent[]" } },
 
   // ------------------------------------------------------------------ comandos
   "/v1/devices/{id}/commands": {
@@ -120,6 +150,15 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/technicians/{tid}": {
     patch: { summary: "Alterar nome, senha (encerra sessões), escopos ou desbloquear", tag: "Acesso técnico", auth: "admin", body: "TechnicianPatch", res: "Updated" },
     delete: { summary: "Desativar técnico e encerrar sessões", tag: "Acesso técnico", auth: "admin", res: "Disabled" },
+  },
+  "/v1/technicians/{tid}/patients": {
+    post: { summary: "Atrelar um voluntário (paciente) ao técnico responsável", description: "O técnico passa a enxergar os devices deste paciente. Pode ter vários.", tag: "Acesso técnico", auth: "admin", body: "AttachPatient", res: "PatientAttached", status: 201 },
+  },
+  "/v1/technicians/{tid}/patients/{pid}": {
+    delete: { summary: "Desatrelar um voluntário do técnico", tag: "Acesso técnico", auth: "admin", res: "PatientDetached" },
+  },
+  "/v1/audit": {
+    get: { summary: "Trilha de auditoria de acesso", description: "Quem acessou os dados de qual voluntário, logins e mudanças de acesso. Filtros: patient_id, action, principal.", tag: "Acesso técnico", auth: "admin", params: ["from", "to", "patient_id", "action", "principal", "limit"], res: "AuditEntry[]" },
   },
   "/v1/tech/login": { post: { summary: "Login técnico (usado pelo app)", description: "Sessão `mbt_…` presa à instalação do celular: 10 min sem uso, 8 h no máximo. 5 senhas erradas bloqueiam a credencial por 15 min (HTTP 429).", tag: "Acesso técnico", auth: "public", body: "TechLogin", res: "TechSession", status: 201 } },
   "/v1/panel/login": { post: { summary: "Login individual de técnico no painel (somente leitura)", description: "Exige o escopo `panel_read` concedido pela gestão. Sessão `mbp_…`: 10 min sem uso, 8 h no máximo.", tag: "Acesso técnico", auth: "public", body: "PanelLogin", res: "PanelSession", status: 201 } },
@@ -214,6 +253,8 @@ const installation = obj({
 const device = obj({
   id: { type: "string", example: "dev_31a796de273d4ce2ba06" },
   name: T.str,
+  type: { type: "string", enum: ["miband", "cgm"], description: "Pulseira Mi Band ou sensor de glicemia AiDEX. Mesmo patient_id agrupa os devices de um paciente." },
+  patient_id: { type: "string", nullable: true, example: "pat_1a2b3c", description: "Paciente (entidade) ao qual o device pertence." },
   patient_ref: { type: "string", nullable: true, example: "P-0001" },
   notes: T.strNull,
   metadata: T.obj,
@@ -251,7 +292,7 @@ const alertRuleInput = obj(
   {
     device_id: { type: "string", nullable: true, description: "null = todas as instalações." },
     name: { type: "string", example: "Taquicardia" },
-    metric: { type: "string", enum: ["heart_rate", "battery", "offline", "event"] },
+    metric: { type: "string", enum: ["heart_rate", "battery", "offline", "event", "glucose"] },
     op: { type: "string", enum: ["gt", "gte", "lt", "lte", "eq"], default: "gt" },
     threshold: { type: "number", nullable: true, description: "Obrigatório exceto para metric=event. Para offline, em segundos." },
     match: { type: "string", nullable: true, description: "Tipo do evento quando metric=event (ex.: START_NONWEAR)." },
@@ -277,7 +318,15 @@ const schemas: Record<string, unknown> = {
   }),
   Device: device,
   DeviceWithToken: { allOf: [ref("Device"), obj({ device_token: { type: "string", description: "Mostrado uma única vez.", example: "mbd_…" } })] },
-  DeviceInput: obj({ name: { type: "string", example: "Paciente 1" }, patient_ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  DeviceInput: obj({ name: { type: "string", example: "Paciente 1" }, type: { type: "string", enum: ["miband", "cgm"], description: "Padrão 'miband'." }, patient_id: { type: "string", nullable: true, description: "Vincula o device a um paciente." }, patient_ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  Patient: obj({ id: { type: "string", example: "pat_1a2b3c" }, name: { type: "string", example: "Paula" }, ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj, created_at: T.ts, updated_at: T.ts, archived_at: T.tsNull, device_count: { type: "integer", description: "Só na listagem." }, online_count: { type: "integer" }, has_band: T.bool, has_cgm: T.bool, last_hr: { type: "integer", nullable: true }, last_hr_ts: T.tsNull, last_glucose: { type: "number", nullable: true, description: "mmol/L" }, last_glucose_ts: T.tsNull, unacked_alerts: T.int }),
+  PatientWithDevices: { allOf: [ref("Patient"), obj({ devices: { type: "array", items: ref("Device") } })] },
+  PatientInput: obj({ name: { type: "string", example: "Paula" }, ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  Archived: obj({ archived: T.str }),
+  FollowerInput: obj({ name: { type: "string", example: "Maria (mãe)" }, credential: { type: "string", example: "maria.paula" }, password: { type: "string", minLength: 8 }, consent_note: { type: "string", nullable: true, description: "Consentimento do voluntário (ex.: autorizado em DD/MM)." } }, ["name", "credential", "password"]),
+  Follower: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, granted_by: T.strNull, consent_note: T.strNull, granted_at: T.tsNull, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  AuditEntry: obj({ id: T.str, ts: T.ts, principal: T.str, action: T.str, patient_id: T.strNull, device_id: T.strNull, detail: T.strNull }),
+  FollowerCreated: obj({ id: T.str, credential: T.str, name: T.str, patient_id: T.str, role: { type: "string", example: "follower" } }),
   Installation: installation,
   InstallationWithToken: { allOf: [ref("Installation"), obj({ device_token: { type: "string", example: "mbd_…" } })] },
   Authorize: obj({ participant_ref: { type: "string", maxLength: 120, example: "P-0001", description: "Código do participante (não use nome ou CPF)." }, name: { type: "string" } }, undefined),
@@ -323,13 +372,31 @@ const schemas: Record<string, unknown> = {
   ConsentDecision: obj({ version: T.str, accepted: T.bool, client: T.obj }, ["version", "accepted"]),
   TechnicianInput: obj({ credential: { type: "string", example: "ana.souza" }, name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision", "panel_read"] }, default: ["tech"] } }, ["credential", "name", "password"]),
   TechnicianPatch: obj({ name: T.str, password: { type: "string", minLength: 10 }, scopes: { type: "array", items: { type: "string", enum: ["tech", "provision", "panel_read"] } }, unlock: T.bool }),
-  Technician: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  Technician: obj({ id: T.str, credential: T.str, name: T.str, scopes: { type: "array", items: T.str }, patient_ids: { type: "array", items: T.str, description: "Voluntários atrelados (vazio = conta ampla)." }, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  AttachPatient: obj({ patient_id: { type: "string", example: "pat_1a2b3c" }, consent_note: { type: "string", nullable: true } }, ["patient_id"]),
+  PatientAttached: obj({ technician: T.str, patient_id: T.str, attached: T.bool }),
+  PatientDetached: obj({ technician: T.str, removed: T.str }),
+  FollowerRemoved: obj({ removed: T.str, technician: T.str, disabled: T.bool }),
   TechLogin: obj({ credential: T.str, password: T.str, device_token: { type: "string", description: "Token da instalação do celular." } }, ["credential", "password"]),
   TechSession: obj({ session_token: { type: "string", example: "mbt_…" }, expires_at: T.ts, idle_timeout_s: T.int, technician: obj({ name: T.str }), scopes: { type: "array", items: T.str } }),
   PanelLogin: obj({ credential: T.str, password: T.str }, ["credential", "password"]),
   PanelSession: obj({ session_token: { type: "string", example: "mbp_…" }, expires_at: T.ts, idle_timeout_s: T.int, technician: obj({ name: T.str }), scopes: { type: "array", items: T.str } }),
   TechInstallation: { allOf: [ref("Installation"), obj({ name: T.str, technician: T.str, scopes: { type: "array", items: T.str }, session_expires_at: T.ts })] },
   TechPing: obj({ ok: T.bool, server_time: T.ts, device_online: T.bool }),
+  AidexStatus: obj({ status: { type: "string", enum: ["unlinked", "pending", "linked", "revoked", "error"] }, env: { type: "string", enum: ["sandbox", "production"] }, cursor_at: T.tsNull, last_poll_at: T.tsNull, last_error: T.strNull, updated_at: T.ts }),
+  AidexConnectInput: obj({ env: { type: "string", enum: ["sandbox", "production"], description: "Padrão: AIDEX_ENV do Worker." } }),
+  AidexConnect: obj({ authorize_url: { type: "string", format: "uri", description: "Abra para o paciente autorizar na AiDEX." }, env: T.str }),
+  AidexPoll: obj({ ok: T.bool, inserted: { type: "integer", description: "Leituras novas gravadas." }, windows: { type: "integer", description: "Janelas de 30 dias consultadas." } }),
+  Glucose: obj({ ts: T.ts, mmol: { type: "number", example: 6.1 }, warning: { type: "string", nullable: true, enum: ["high glucose alert", "low glucose alert", "urgent low glucose alert", null] }, avg: { type: "number", description: "Só com bucket" }, min: T.num, max: T.num, samples: T.int }),
+  GlucoseSummary: obj({
+    window_from: T.ts, window_to: T.ts, unit: { type: "string", example: "mmol/L" }, samples: T.int, from: T.tsNull, to: T.tsNull,
+    mean_mmol: { type: "number", nullable: true }, mean_mgdl: { type: "number", nullable: true },
+    gmi_percent: { type: "number", nullable: true, description: "Glucose Management Indicator (%)." },
+    cv_percent: { type: "number", nullable: true, description: "Coeficiente de variação (%)." },
+    min_mmol: { type: "number", nullable: true }, max_mmol: { type: "number", nullable: true },
+    tir: obj({ very_low: T.num, low: T.num, in_range: T.num, high: T.num, very_high: T.num }),
+  }),
+  GlucoseEvent: obj({ type: { type: "string", enum: ["diet", "exercise", "medication", "insulin", "other"] }, ext_id: T.str, ts: T.ts, payload: T.obj }),
   Deleted: obj({ deleted: T.str }),
   Revoked: obj({ revoked: T.str }),
   Disabled: obj({ disabled: T.str }),
