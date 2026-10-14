@@ -49,7 +49,7 @@
 
 <section id="app" class="hidden">
   <nav aria-label="Seções administrativas">
-    <button data-tab="patients">Pacientes</button>
+    <button data-tab="patients">Voluntários</button>
     <button data-tab="installs" aria-current="page">Instalações</button>
     <button data-tab="monitor">Monitoramento</button>
     <button data-tab="terms">Termos de participação</button>
@@ -137,17 +137,17 @@
       <p class="monitor-footnote">As séries mostram somente os dados recebidos e armazenados pela nuvem; períodos sem amostras permanecem vazios.</p>
     </section>
 
-    <!-- Pacientes (visão consolidada: pulseira + glicemia) -->
+    <!-- Voluntários (visão consolidada: pulseira + glicemia) -->
     <section data-panel="patients" class="hidden" aria-labelledby="patientsTitle">
       <div class="page-heading monitor-heading">
         <div><p class="eyebrow">Acompanhamento / Visão por pessoa</p>
-          <h1 id="patientsTitle">Pacientes</h1>
-          <p class="sub">Pulseira BIOSENSE Pulse e sensor de glicemia AiDEX consolidados por paciente.</p></div>
-        <div class="refresh-control"><span id="patUpdatedAt" class="muted" role="status">Selecione um paciente</span>
+          <h1 id="patientsTitle">Voluntários</h1>
+          <p class="sub">Pulseira BIOSENSE Pulse e sensor de glicemia AiDEX consolidados por voluntário.</p></div>
+        <div class="refresh-control"><span id="patUpdatedAt" class="muted" role="status">Selecione um voluntário</span>
           <button class="btn secondary" id="patReload">Atualizar <span aria-hidden="true">↻</span></button></div>
       </div>
       <div class="monitor-filters">
-        <div><label for="patSelect">Paciente</label><select id="patSelect"></select></div>
+        <div><label for="patSelect">Voluntário</label><select id="patSelect"></select></div>
         <div><label for="patRange">Período</label><select id="patRange">
           <option value="86400000">Últimas 24 horas</option>
           <option value="604800000">Últimos 7 dias</option>
@@ -159,7 +159,7 @@
       </div>
       <div id="patNotice" class="notice hidden" role="status"></div>
       <div id="patHeader" class="patient-header"></div>
-      <dl class="monitor-kpis" aria-label="Resumo do paciente">
+      <dl class="monitor-kpis" aria-label="Resumo do voluntário">
         <div><dt>Glicemia atual</dt><dd id="kGluNow">—</dd><small id="kGluNowAt">sem leituras</small></div>
         <div><dt>No alvo (TIR)</dt><dd id="kTir">—</dd><small id="kTirRange">3,9–10,0 mmol/L</small></div>
         <div><dt>GMI</dt><dd id="kGmi">—</dd><small id="kGluMean">glicose média —</small></div>
@@ -193,7 +193,7 @@
           <div class="monitor-section-head"><div><p class="eyebrow">Integração</p><h2>Sensor AiDEX</h2></div></div>
           <div id="aidexStatus" class="muted">—</div>
           <div class="actions" id="aidexActions" style="margin-top:12px"></div>
-          <p class="muted">A coleta é automática a cada 15 min após o paciente autorizar.</p>
+          <p class="muted">A coleta é automática a cada 15 min após o voluntário autorizar.</p>
         </section>
       </div>
       <p class="monitor-footnote">Faixas de glicose (mmol/L): &lt;3,0 muito baixa · 3,0–3,9 baixa · 3,9–10,0 no alvo · 10,0–13,9 alta · &gt;13,9 muito alta.</p>

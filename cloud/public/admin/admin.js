@@ -85,7 +85,7 @@ async function start() {
     if (!canRead) return logout("Esta credencial não tem permissão de leitura.");
     $("#who").textContent = me.id === "admin" ? "Gestão" : me.id.startsWith("tech:") ? (sessionStorage.getItem(TECH_NAME) || "Técnico") : canManage ? "Gestão" : "Leitura";
     $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); $("#logout").classList.remove("hidden"); $("#docsLink").classList.remove("hidden");
-    // Sem gestão (seguidor/técnico só-leitura): Pacientes (consolidado) + Monitoramento
+    // Sem gestão (seguidor/técnico só-leitura): Voluntários (consolidado) + Monitoramento
     // (detalhe por dispositivo), ambos já escopados aos devices da conta.
     const readerTabs = ["patients", "monitor"];
     document.querySelectorAll("nav [data-tab]").forEach((button) => {
@@ -518,10 +518,6 @@ async function loadMonitorData() {
     }));
     $("#eventsEmpty").classList.toggle("hidden", Boolean(events.count));
     $("#monitorUpdatedAt").textContent = `Atualizado às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
-    if (sleep.warning) {
-      notice.textContent = "Sono: " + sleep.warning;
-      notice.className = "notice warn";
-    }
   } catch (e) {
     if (request === monitorRequest && e.message !== "unauthorized") {
       notice.textContent = e.message; notice.className = "notice error";
@@ -616,7 +612,7 @@ const loadAlerts = guard(async () => {
   $("#alertsEmpty").textContent = data.length ? "" : "Nenhum alerta pendente.";
 });
 
-// ------------------------------------------------------------------ pacientes (visão consolidada)
+// ------------------------------------------------------------------ voluntários (visão consolidada)
 let patients = [];
 let selectedPatientId = "";
 let patRequest = 0;
@@ -649,9 +645,9 @@ async function loadPatients() {
     if (!data.length) {
       select.replaceChildren();
       selectedPatientId = "";
-      $("#patHeader").replaceChildren(el("p", { class: "muted" }, "Nenhum paciente cadastrado."));
-      $("#patUpdatedAt").textContent = "Sem pacientes";
-      return setPatientEmpty("Nenhum paciente cadastrado.");
+      $("#patHeader").replaceChildren(el("p", { class: "muted" }, "Nenhum voluntário cadastrado."));
+      $("#patUpdatedAt").textContent = "Sem voluntários";
+      return setPatientEmpty("Nenhum voluntário cadastrado.");
     }
     select.replaceChildren(...data.map((p) => el("option", { value: p.id }, `${p.name}${p.ref ? " · " + p.ref : ""}`)));
     if (!data.some((p) => p.id === selectedPatientId)) selectedPatientId = data[0].id;
@@ -694,7 +690,7 @@ function renderGlucoseEvents(rows) {
 async function connectAidex(deviceId) {
   const r = await api("POST", `/v1/devices/${encodeURIComponent(deviceId)}/aidex/connect`, {});
   $("#aidexActions").replaceChildren(
-    el("p", { class: "muted" }, "Abra este link para o paciente autorizar no AiDEX:"),
+    el("p", { class: "muted" }, "Abra este link para o voluntário autorizar no AiDEX:"),
     el("a", { href: r.authorize_url, target: "_blank", rel: "noopener", class: "link" }, "Abrir autorização AiDEX ↗"),
   );
   flash("Link de autorização gerado.");
@@ -703,7 +699,7 @@ async function connectAidex(deviceId) {
 function renderAidex(cgm, status) {
   const box = $("#aidexStatus"); const actions = $("#aidexActions");
   actions.replaceChildren();
-  if (!cgm) { box.textContent = "Este paciente não tem sensor de glicemia vinculado."; return; }
+  if (!cgm) { box.textContent = "Este voluntário não tem sensor de glicemia vinculado."; return; }
   const st = (status && status.status) || "unlinked";
   const label = { unlinked: "Não conectado", pending: "Aguardando autorização", linked: "Conectado", revoked: "Revogado — reautorizar", error: "Erro na coleta" }[st] || st;
   const cls = st === "linked" ? "active" : (st === "error" || st === "revoked") ? "revoked" : "pending";
@@ -735,7 +731,7 @@ function drawGlucoseChart(box, rows) {
 
 function drawPatientHr(box, rows, hasBand) {
   const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg != null ? r.avg : r.bpm) })).filter((p) => Number.isFinite(p.value));
-  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de FC neste período." : "Paciente sem pulseira vinculada.")); return; }
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de FC neste período." : "Voluntário sem pulseira vinculada.")); return; }
   const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 210"); svg.setAttribute("role", "presentation"); svg.setAttribute("preserveAspectRatio", "none");
   const min = Math.min(...points.map((p) => p.value)); const max = Math.max(...points.map((p) => p.value));
   const pad = Math.max(5, Math.ceil((max - min) * 0.15)); const lo = Math.max(0, min - pad); const hi = max + pad;
@@ -784,7 +780,7 @@ async function exportStream(deviceId, stream, label, from, to) {
 
 function drawPatientSteps(box, rows, hasBand) {
   const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.steps) })).filter((p) => Number.isFinite(p.value));
-  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de passos neste período." : "Paciente sem pulseira vinculada.")); return; }
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de passos neste período." : "Voluntário sem pulseira vinculada.")); return; }
   const max = Math.max(1, ...points.map((p) => p.value));
   const shown = points.slice(-30);
   const bars = el("div", { class: "chart-bars", role: "list" }, ...shown.map((p) => {
@@ -797,7 +793,7 @@ function drawPatientSteps(box, rows, hasBand) {
 
 async function loadPatientData() {
   const patient = patients.find((p) => p.id === selectedPatientId);
-  if (!patient) return setPatientEmpty("Selecione um paciente.");
+  if (!patient) return setPatientEmpty("Selecione um voluntário.");
   const request = ++patRequest;
   $("#patNotice").classList.add("hidden");
   $("#patUpdatedAt").textContent = "Atualizando…";
