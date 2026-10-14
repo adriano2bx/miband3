@@ -119,7 +119,8 @@ describe("aidex — rotas", () => {
 
   it("glucose agrega por bucket", async () => {
     const d = await newDevice("Glicemia D");
-    const base = Date.now() - 3600_000;
+    // Ancorado na borda de 5 min para as duas leituras caírem sempre no mesmo bucket.
+    const base = Math.floor((Date.now() - 3600_000) / 300_000) * 300_000;
     await env.DB.batch([
       env.DB.prepare("INSERT INTO glucose (device_id, ts, mmol, warning) VALUES (?, ?, ?, ?)").bind(d.id, base, 6.0, null),
       env.DB.prepare("INSERT INTO glucose (device_id, ts, mmol, warning) VALUES (?, ?, ?, ?)").bind(d.id, base + 30_000, 8.0, null),
