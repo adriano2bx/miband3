@@ -26,7 +26,7 @@
       <p class="sub">Entre com uma credencial individual. O acesso de gestão continua disponível pela chave administrativa.</p>
       <div class="login-switch" role="group" aria-label="Tipo de acesso">
         <button type="button" data-login-mode="admin" aria-pressed="true">Gestão</button>
-        <button type="button" data-login-mode="tech" aria-pressed="false">Técnico</button>
+        <button type="button" data-login-mode="tech" aria-pressed="false">Acesso individual</button>
       </div>
       <form id="loginForm">
         <div id="adminLoginFields">
@@ -38,7 +38,7 @@
           <input id="techCredential" autocomplete="username">
           <label for="techPassword" style="margin-top:12px">Senha</label>
           <input id="techPassword" type="password" autocomplete="current-password">
-          <p class="muted" style="margin:10px 0 0">Acesso ao painel somente para técnicos autorizados pela gestão.</p>
+          <p class="muted" style="margin:10px 0 0">Acesso individual concedido pela gestão — técnico responsável, voluntário ou pessoa autorizada (seguidor).</p>
         </div>
         <div style="margin-top:16px"><button class="btn" type="submit">Entrar</button></div>
       </form>
@@ -161,6 +161,8 @@
         <div><dt>No alvo (TIR)</dt><dd id="kTir">—</dd><small id="kTirRange">3,9–10,0 mmol/L</small></div>
         <div><dt>GMI</dt><dd id="kGmi">—</dd><small id="kGluMean">glicose média —</small></div>
         <div><dt>FC média</dt><dd id="kHr">—</dd><small id="kHrRange">sem amostras</small></div>
+        <div><dt>Passos</dt><dd id="kSteps">—</dd><small>máximo no período</small></div>
+        <div><dt>Sono estimado</dt><dd id="kSleep">—</dd><small>classificação provisória</small></div>
         <div><dt>Alertas</dt><dd id="kAlerts">—</dd><small>não reconhecidos</small></div>
       </dl>
       <div class="monitor-grid">
@@ -173,6 +175,10 @@
         <section class="monitor-chart" aria-labelledby="patHrChartTitle">
           <div class="monitor-section-head"><div><p class="eyebrow">Pulseira BIOSENSE Pulse</p><h2 id="patHrChartTitle">Frequência cardíaca</h2></div><span class="chart-unit">bpm</span></div>
           <div class="chart" id="patHrChart" role="img" aria-label="Gráfico de frequência cardíaca"></div>
+        </section>
+        <section class="monitor-chart" aria-labelledby="patStepsTitle">
+          <div class="monitor-section-head"><div><p class="eyebrow">Atividade diária</p><h2 id="patStepsTitle">Passos</h2></div><span class="chart-unit">passos</span></div>
+          <div class="chart" id="patStepsChart" role="img" aria-label="Gráfico de passos"></div>
         </section>
         <section class="monitor-table-panel">
           <div class="monitor-section-head"><div><p class="eyebrow">Linha do tempo</p><h2>Eventos de glicemia</h2></div></div>

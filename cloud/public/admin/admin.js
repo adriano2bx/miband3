@@ -630,8 +630,8 @@ const TIR_BANDS = [
 const gluEventType = { diet: "Refeição", exercise: "Exercício", medication: "Medicação", insulin: "Insulina", other: "Outro" };
 
 function setPatientEmpty(msg) {
-  ["gluChart", "patHrChart"].forEach((id) => $("#" + id).replaceChildren(el("div", { class: "chart-empty" }, msg || "Sem dados.")));
-  ["kGluNow", "kTir", "kGmi", "kHr", "kAlerts"].forEach((id) => $("#" + id).textContent = "—");
+  ["gluChart", "patHrChart", "patStepsChart"].forEach((id) => $("#" + id).replaceChildren(el("div", { class: "chart-empty" }, msg || "Sem dados.")));
+  ["kGluNow", "kTir", "kGmi", "kHr", "kSteps", "kSleep", "kAlerts"].forEach((id) => $("#" + id).textContent = "—");
   $("#kGluNowAt").textContent = "sem leituras"; $("#kGluMean").textContent = "glicose média —"; $("#kHrRange").textContent = "sem amostras";
   $("#tirBar").replaceChildren(); $("#tirLegend").replaceChildren();
   $("#gluEventRows").replaceChildren(); $("#gluEventsEmpty").classList.remove("hidden");
@@ -745,6 +745,19 @@ function drawPatientHr(box, rows, hasBand) {
   box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${Math.min(...points.map((p) => p.value))}–${Math.max(...points.map((p) => p.value))} bpm`, dateLabel(points.at(-1).ts)));
 }
 
+function drawPatientSteps(box, rows, hasBand) {
+  const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.steps) })).filter((p) => Number.isFinite(p.value));
+  if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, hasBand ? "Sem registros de passos neste período." : "Paciente sem pulseira vinculada.")); return; }
+  const max = Math.max(1, ...points.map((p) => p.value));
+  const shown = points.slice(-30);
+  const bars = el("div", { class: "chart-bars", role: "list" }, ...shown.map((p) => {
+    const bar = el("div", { class: "chart-bar", role: "listitem", title: `${dateLabel(p.ts)} · ${p.value.toLocaleString("pt-BR")} passos` });
+    bar.append(el("span", { style: `--bar-height:${Math.max(2, p.value / max * 100)}%` }));
+    return bar;
+  }));
+  box.replaceChildren(bars, el("div", { class: "chart-labels" }, dateLabel(shown[0].ts), `${Math.max(...points.map((p) => p.value)).toLocaleString("pt-BR")} passos`, dateLabel(shown.at(-1).ts)));
+}
+
 async function loadPatientData() {
   const patient = patients.find((p) => p.id === selectedPatientId);
   if (!patient) return setPatientEmpty("Selecione um paciente.");
@@ -774,6 +787,7 @@ async function loadPatientData() {
     }
     if (band) {
       tasks.hr = api("GET", `/v1/devices/${band.id}/heart-rate?${win}&bucket=${bucket}&limit=1000`).catch(() => null);
+      tasks.steps = api("GET", `/v1/devices/${band.id}/steps?${win}&bucket=${span <= 86_400_000 ? "1h" : "1d"}&tz_offset_min=-180&limit=1000`).catch(() => null);
       tasks.hrsum = api("GET", `/v1/devices/${band.id}/summary?${win}`).catch(() => null);
     }
     const keys = Object.keys(tasks);
@@ -794,6 +808,12 @@ async function loadPatientData() {
     const h = (r.hrsum && r.hrsum.heart_rate) || {};
     $("#kHr").textContent = h.samples ? `${h.avg} bpm` : "—";
     $("#kHrRange").textContent = h.samples ? `mín. ${h.min} · máx. ${h.max}` : "sem amostras";
+
+    drawPatientSteps($("#patStepsChart"), (r.steps && r.steps.data) || [], !!band);
+    const st = (r.hrsum && r.hrsum.steps) || {};
+    $("#kSteps").textContent = st.max_steps == null ? "—" : Number(st.max_steps).toLocaleString("pt-BR");
+    const sl = (r.hrsum && r.hrsum.sleep) || {};
+    $("#kSleep").textContent = sl.total_min ? `${Math.floor(sl.total_min / 60)}h ${String(sl.total_min % 60).padStart(2, "0")}min` : "—";
 
     $("#patUpdatedAt").textContent = `Atualizado ${fmt(Date.now())}`;
   } catch (e) {
