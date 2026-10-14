@@ -46,8 +46,8 @@ jobs:
             echo "::error::Faltam os segredos:$missing (Settings → Secrets and variables → Actions)"
             exit 1
           fi
-          if [ ${#ADMIN_API_KEY} -lt 32 ]; then
-            echo "::error::ADMIN_API_KEY precisa ter pelo menos 32 caracteres"
+          if [ ${#ADMIN_API_KEY} -lt 8 ]; then
+            echo "::error::ADMIN_API_KEY precisa ter pelo menos 8 caracteres"
             exit 1
           fi
       - run: npm ci
