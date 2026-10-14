@@ -12,6 +12,7 @@ import { participantApi } from "./participant-api";
 import { effectiveConfig } from "./participants";
 import * as aidex from "./aidex";
 import type { AidexEnv } from "./aidex";
+import { audit } from "./audit";
 
 export const api = new Hono<AppEnv>();
 
@@ -413,6 +414,7 @@ api.get("/v1/patients/:pid", requireAuth("read"), async (c) => {
   const pat = await c.env.DB.prepare("SELECT * FROM patients WHERE id = ?").bind(pid).first<PatientRow>();
   if (!pat) return c.json({ error: "not_found" }, 404);
   const { results } = await c.env.DB.prepare("SELECT * FROM devices WHERE patient_id = ? AND archived_at IS NULL ORDER BY type").bind(pid).all<DeviceRow>();
+  await audit(c.env, { principal: c.get("principal").id, action: "patient.view", patient_id: pid });
   return c.json(serializePatient(pat, { devices: results.map(serializeDevice) }));
 });
 
@@ -852,6 +854,7 @@ api.post("/v1/alerts/:aid/ack", requireAuth("read"), async (c) => {
   if (!row) return c.json({ error: "not_found" }, 404);
   if (!canAccess(c.get("principal"), row.device_id)) return c.json({ error: "forbidden" }, 403);
   await c.env.DB.prepare("UPDATE alerts SET acked_at = COALESCE(acked_at, ?), acked_by = COALESCE(acked_by, ?) WHERE id = ?").bind(Date.now(), c.get("principal").id, aid).run();
+  await audit(c.env, { principal: c.get("principal").id, action: "alert.ack", device_id: row.device_id, detail: aid });
   return c.json((await c.env.DB.prepare("SELECT * FROM alerts WHERE id = ?").bind(aid).first())!);
 });
 
@@ -947,6 +950,20 @@ api.get("/v1/me", async (c) => {
   const p = await authenticate(c.req.raw, c.env);
   if (!p) return c.json({ error: "unauthorized" }, 401);
   return c.json({ id: p.id, scopes: [...p.scopes], device_ids: p.deviceIds });
+});
+
+/** Trilha de auditoria de acesso aos dados (LGPD/clínico). */
+api.get("/v1/audit", requireAuth("admin"), async (c) => {
+  const q = c.req.query();
+  const r = range(c, 30 * 86400_000);
+  if (isResponse(r)) return r;
+  const where = ["ts BETWEEN ? AND ?"];
+  const args: unknown[] = [r.from, r.to];
+  if (q.patient_id) { where.push("patient_id = ?"); args.push(q.patient_id); }
+  if (q.action) { where.push("action = ?"); args.push(q.action); }
+  if (q.principal) { where.push("principal = ?"); args.push(q.principal); }
+  const { results } = await c.env.DB.prepare(`SELECT * FROM audit_log WHERE ${where.join(" AND ")} ORDER BY ts DESC LIMIT ?`).bind(...args, r.limit).all();
+  return c.json({ data: results, count: results.length });
 });
 
 api.notFound((c) => c.json({ error: "not_found", message: "Rota inexistente. Veja /v1/openapi.json." }, 404));

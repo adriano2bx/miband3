@@ -47,6 +47,21 @@ describe("seguidores (acesso por paciente)", () => {
     expect(cantCreate.status).toBe(403);
   });
 
+  it("registra consentimento do seguidor e audita o acesso", async () => {
+    const p = (await call("POST", "/v1/patients", { body: { name: "Auditada" } })).json.id as string;
+    const f = await call("POST", `/v1/patients/${p}/followers`, { body: { name: "Seg", credential: "seg.aud", password: "senhaforte1", consent_note: "autorizado em 14/10" } });
+    expect(f.status).toBe(201);
+
+    const list = await call("GET", `/v1/patients/${p}/followers`);
+    expect(list.json.data[0].consent_note).toBe("autorizado em 14/10");
+
+    await call("GET", `/v1/patients/${p}`); // gera patient.view
+    const aud = await call("GET", `/v1/audit?patient_id=${p}&from=0&to=99999999999999`);
+    const actions = aud.json.data.map((a: any) => a.action);
+    expect(actions).toContain("follower.grant");
+    expect(actions).toContain("patient.view");
+  });
+
   it("técnico responsável enxerga vários voluntários atrelados", async () => {
     const p1 = (await call("POST", "/v1/patients", { body: { name: "Voluntário 1" } })).json.id as string;
     const p2 = (await call("POST", "/v1/patients", { body: { name: "Voluntário 2" } })).json.id as string;
