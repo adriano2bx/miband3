@@ -61,6 +61,16 @@ describe("aidex — rotas", () => {
     expect(r.json.error).toBe("not_configured");
   });
 
+  it("device nasce como 'miband' e aceita 'cgm' no cadastro", async () => {
+    const def = await call("POST", "/v1/devices", { body: { name: "Padrão" } });
+    expect(def.status).toBe(201);
+    expect(def.json.type).toBe("miband");
+
+    const cgm = await call("POST", "/v1/devices", { body: { name: "Sensor", type: "cgm" } });
+    expect(cgm.status).toBe(201);
+    expect(cgm.json.type).toBe("cgm");
+  });
+
   it("glucose e summary refletem as leituras armazenadas", async () => {
     const d = await newDevice("Glicemia C");
     const base = Date.now() - 3600_000;

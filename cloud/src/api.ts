@@ -96,11 +96,13 @@ interface DeviceRow {
   config: string;
   config_version: number;
   config_updated_at: number | null;
+  type: string;
 }
 
 const serializeDevice = (d: DeviceRow) => ({
   id: d.id,
   name: d.name,
+  type: d.type ?? "miband",
   patient_ref: d.patient_ref,
   notes: d.notes,
   metadata: parseJson(d.metadata, {}),
@@ -188,6 +190,9 @@ const DeviceInput = z.object({
   patient_ref: z.string().max(120).nullish(),
   notes: z.string().max(2000).nullish(),
   metadata: z.record(z.unknown()).optional(),
+  // 'miband' (pulseira, padrão) ou 'cgm' (sensor de glicemia AiDEX). Mesmo
+  // patient_ref agrupa os devices de um paciente (pode ter um de cada tipo).
+  type: z.enum(["miband", "cgm"]).optional(),
 });
 
 api.post("/v1/devices", requireAuth("manage"), async (c) => {
@@ -197,9 +202,9 @@ api.post("/v1/devices", requireAuth("manage"), async (c) => {
   const token = randomToken("mbd");
   const now = Date.now();
   await c.env.DB.prepare(
-    "INSERT INTO devices (id, name, patient_ref, notes, metadata, token_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO devices (id, name, patient_ref, notes, metadata, token_hash, created_at, updated_at, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   )
-    .bind(id, b.data.name, b.data.patient_ref ?? null, b.data.notes ?? null, JSON.stringify(b.data.metadata ?? {}), await sha256Hex(token), now, now)
+    .bind(id, b.data.name, b.data.patient_ref ?? null, b.data.notes ?? null, JSON.stringify(b.data.metadata ?? {}), await sha256Hex(token), now, now, b.data.type ?? "miband")
     .run();
   const device = await loadDevice(c, id);
   // O token só é exibido agora; configure-o no app (campo "Token do dispositivo").
@@ -451,6 +456,8 @@ api.post("/v1/devices/:id/aidex/connect", deviceRoute("manage"), async (c) => {
      VALUES (?, ?, 'pending', ?, ?, ?)
      ON CONFLICT(device_id) DO UPDATE SET env = excluded.env, status = 'pending', state = excluded.state, updated_at = excluded.updated_at`,
   ).bind(id, env, state, now, now).run();
+  // Um device com vínculo AiDEX é, por definição, um sensor CGM.
+  await c.env.DB.prepare("UPDATE devices SET type = 'cgm', updated_at = ? WHERE id = ?").bind(now, id).run();
   return c.json({ authorize_url: aidex.authorizeUrl(c.env, env, state), env });
 });
 

@@ -226,6 +226,7 @@ const installation = obj({
 const device = obj({
   id: { type: "string", example: "dev_31a796de273d4ce2ba06" },
   name: T.str,
+  type: { type: "string", enum: ["miband", "cgm"], description: "Pulseira Mi Band ou sensor de glicemia AiDEX. Mesmo patient_ref agrupa os devices de um paciente." },
   patient_ref: { type: "string", nullable: true, example: "P-0001" },
   notes: T.strNull,
   metadata: T.obj,
@@ -289,7 +290,7 @@ const schemas: Record<string, unknown> = {
   }),
   Device: device,
   DeviceWithToken: { allOf: [ref("Device"), obj({ device_token: { type: "string", description: "Mostrado uma única vez.", example: "mbd_…" } })] },
-  DeviceInput: obj({ name: { type: "string", example: "Paciente 1" }, patient_ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  DeviceInput: obj({ name: { type: "string", example: "Paciente 1" }, type: { type: "string", enum: ["miband", "cgm"], description: "Padrão 'miband'." }, patient_ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
   Installation: installation,
   InstallationWithToken: { allOf: [ref("Installation"), obj({ device_token: { type: "string", example: "mbd_…" } })] },
   Authorize: obj({ participant_ref: { type: "string", maxLength: 120, example: "P-0001", description: "Código do participante (não use nome ou CPF)." }, name: { type: "string" } }, undefined),
