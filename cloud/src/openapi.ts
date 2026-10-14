@@ -31,6 +31,24 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/me": { get: { summary: "Escopos e pulseiras da chave usada", tag: "Geral", auth: "read", res: "Me" } },
   "/v1/openapi.json": { get: { summary: "Esta especificação", tag: "Geral", auth: "public" } },
 
+  // ------------------------------------------------------------------ pacientes
+  "/v1/patients": {
+    get: { summary: "Listar pacientes", description: "Um paciente agrupa os devices de uma pessoa (pulseira e/ou CGM). Inclui device_count.", tag: "Pacientes", auth: "read", params: ["archived"], res: "Patient[]" },
+    post: { summary: "Criar paciente", tag: "Pacientes", auth: "manage", body: "PatientInput", res: "PatientWithDevices", status: 201 },
+  },
+  "/v1/patients/{pid}": {
+    get: { summary: "Detalhes do paciente (com seus devices)", tag: "Pacientes", auth: "read", res: "PatientWithDevices" },
+    patch: { summary: "Alterar nome, referência, notas e metadados", tag: "Pacientes", auth: "manage", body: "PatientInput", res: "Patient" },
+    delete: { summary: "Arquivar paciente", description: "Arquiva o paciente e desvincula os devices (que continuam existindo).", tag: "Pacientes", auth: "manage", res: "Archived" },
+  },
+  "/v1/patients/{pid}/followers": {
+    get: { summary: "Seguidores do paciente", description: "Contas de painel só-leitura amarradas ao paciente.", tag: "Pacientes", auth: "manage", res: "Follower[]" },
+    post: { summary: "Criar seguidor (acesso só-leitura ao paciente)", description: "Entra no painel pelo login de técnico (credencial + senha) e só enxerga os devices deste paciente.", tag: "Pacientes", auth: "manage", body: "FollowerInput", res: "FollowerCreated", status: 201 },
+  },
+  "/v1/patients/{pid}/followers/{tid}": {
+    delete: { summary: "Remover seguidor", tag: "Pacientes", auth: "manage", res: "Disabled" },
+  },
+
   // ------------------------------------------------------------------ tempo real
   "/v1/overview": { get: { summary: "Último valor de todos os participantes", description: "Uma linha por instalação com última FC, bateria, passos e alertas pendentes.", tag: "Tempo real", auth: "read", res: "Overview[]" } },
   "/v1/devices/{id}/status": { get: { summary: "Estado ao vivo de uma instalação", tag: "Tempo real", auth: "read", res: "LiveStatus" } },
@@ -226,7 +244,8 @@ const installation = obj({
 const device = obj({
   id: { type: "string", example: "dev_31a796de273d4ce2ba06" },
   name: T.str,
-  type: { type: "string", enum: ["miband", "cgm"], description: "Pulseira Mi Band ou sensor de glicemia AiDEX. Mesmo patient_ref agrupa os devices de um paciente." },
+  type: { type: "string", enum: ["miband", "cgm"], description: "Pulseira Mi Band ou sensor de glicemia AiDEX. Mesmo patient_id agrupa os devices de um paciente." },
+  patient_id: { type: "string", nullable: true, example: "pat_1a2b3c", description: "Paciente (entidade) ao qual o device pertence." },
   patient_ref: { type: "string", nullable: true, example: "P-0001" },
   notes: T.strNull,
   metadata: T.obj,
@@ -290,7 +309,14 @@ const schemas: Record<string, unknown> = {
   }),
   Device: device,
   DeviceWithToken: { allOf: [ref("Device"), obj({ device_token: { type: "string", description: "Mostrado uma única vez.", example: "mbd_…" } })] },
-  DeviceInput: obj({ name: { type: "string", example: "Paciente 1" }, type: { type: "string", enum: ["miband", "cgm"], description: "Padrão 'miband'." }, patient_ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  DeviceInput: obj({ name: { type: "string", example: "Paciente 1" }, type: { type: "string", enum: ["miband", "cgm"], description: "Padrão 'miband'." }, patient_id: { type: "string", nullable: true, description: "Vincula o device a um paciente." }, patient_ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  Patient: obj({ id: { type: "string", example: "pat_1a2b3c" }, name: { type: "string", example: "Paula" }, ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj, created_at: T.ts, updated_at: T.ts, archived_at: T.tsNull, device_count: { type: "integer", description: "Só na listagem." } }),
+  PatientWithDevices: { allOf: [ref("Patient"), obj({ devices: { type: "array", items: ref("Device") } })] },
+  PatientInput: obj({ name: { type: "string", example: "Paula" }, ref: { type: "string", nullable: true, example: "P-0001" }, notes: T.strNull, metadata: T.obj }, ["name"]),
+  Archived: obj({ archived: T.str }),
+  FollowerInput: obj({ name: { type: "string", example: "Maria (mãe)" }, credential: { type: "string", example: "maria.paula" }, password: { type: "string", minLength: 8 } }, ["name", "credential", "password"]),
+  Follower: obj({ id: T.str, credential: T.str, name: T.str, created_at: T.ts, disabled_at: T.tsNull, locked_until: T.tsNull }),
+  FollowerCreated: obj({ id: T.str, credential: T.str, name: T.str, patient_id: T.str, role: { type: "string", example: "follower" } }),
   Installation: installation,
   InstallationWithToken: { allOf: [ref("Installation"), obj({ device_token: { type: "string", example: "mbd_…" } })] },
   Authorize: obj({ participant_ref: { type: "string", maxLength: 120, example: "P-0001", description: "Código do participante (não use nome ou CPF)." }, name: { type: "string" } }, undefined),

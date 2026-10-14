@@ -23,16 +23,22 @@ export async function authenticate(req: Request, env: Env): Promise<Principal | 
   if (token.startsWith("mbp_")) {
     const now = Date.now();
     const session = await env.DB.prepare(
-      `SELECT s.id, s.technician_id, s.expires_at, s.max_expires_at, s.revoked_at, t.scopes, t.disabled_at
+      `SELECT s.id, s.technician_id, s.expires_at, s.max_expires_at, s.revoked_at, t.scopes, t.disabled_at, t.patient_id
        FROM panel_sessions s JOIN technicians t ON t.id = s.technician_id WHERE s.token_hash = ?`,
     ).bind(await sha256Hex(token)).first<{
-      id: string; technician_id: string; expires_at: number; max_expires_at: number; revoked_at: number | null; scopes: string; disabled_at: number | null;
+      id: string; technician_id: string; expires_at: number; max_expires_at: number; revoked_at: number | null; scopes: string; disabled_at: number | null; patient_id: string | null;
     }>();
     const technicianScopes = parseJson<string[]>(session?.scopes ?? "[]", []);
     if (!session || session.revoked_at || session.disabled_at || session.expires_at <= now || session.max_expires_at <= now || !technicianScopes.includes("panel_read")) return null;
     const expiresAt = Math.min(now + TECH_SESSION_IDLE_MS, session.max_expires_at);
     env.DB.prepare("UPDATE panel_sessions SET expires_at = ? WHERE id = ?").bind(expiresAt, session.id).run().catch(() => {});
-    return { id: `tech:${session.technician_id}`, scopes: new Set(["read"]), deviceIds: null };
+    // Conta amarrada a um paciente (seguidor): só enxerga os devices desse paciente.
+    let deviceIds: string[] | null = null;
+    if (session.patient_id) {
+      const { results } = await env.DB.prepare("SELECT id FROM devices WHERE patient_id = ? AND archived_at IS NULL").bind(session.patient_id).all<{ id: string }>();
+      deviceIds = results.map((r) => r.id);
+    }
+    return { id: `tech:${session.technician_id}`, scopes: new Set(["read"]), deviceIds };
   }
   if (!token.startsWith("mbk_")) return null;
 
