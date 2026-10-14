@@ -10,6 +10,8 @@ import { deliverOne, WEBHOOK_EVENTS } from "./webhooks";
 import { openapi } from "./openapi";
 import { participantApi } from "./participant-api";
 import { effectiveConfig } from "./participants";
+import * as aidex from "./aidex";
+import type { AidexEnv } from "./aidex";
 
 export const api = new Hono<AppEnv>();
 
@@ -412,6 +414,129 @@ api.get("/v1/devices/:id/summary", deviceRoute("read"), async (c) => {
     alerts: alerts.results,
     sleep: { sessions: sessions.length, total_min: sessions.reduce((a, s) => a + s.duration_min, 0), provisional: true },
   });
+});
+
+// ====================================================================== glicemia (AiDEX)
+
+function pickAidexEnv(c: Context<AppEnv>, value?: unknown): AidexEnv {
+  const v = (value ?? c.env.AIDEX_ENV ?? "sandbox") as string;
+  return v === "production" ? "production" : "sandbox";
+}
+
+/** Estado do vínculo AiDEX da pulseira (nunca expõe tokens). */
+api.get("/v1/devices/:id/aidex", deviceRoute("read"), async (c) => {
+  const link = await aidex.getLink(c.env, c.req.param("id")!);
+  if (!link) return c.json({ status: "unlinked" });
+  return c.json({
+    status: link.status,
+    env: link.env,
+    cursor_at: link.cursor_at,
+    last_poll_at: link.last_poll_at,
+    last_error: link.last_error,
+    updated_at: link.updated_at,
+  });
+});
+
+/** Inicia o vínculo: devolve a URL oficial de autorização para o paciente abrir e autorizar. */
+api.post("/v1/devices/:id/aidex/connect", deviceRoute("manage"), async (c) => {
+  if (!c.env.AIDEX_CLIENT_ID) return c.json({ error: "not_configured", message: "AIDEX_CLIENT_ID não configurado." }, 503);
+  const id = c.req.param("id")!;
+  const b = await body(c, z.object({ env: z.enum(["sandbox", "production"]).optional() }));
+  if (!b.ok) return b.res;
+  const env = pickAidexEnv(c, b.data.env);
+  const state = randomToken("st");
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO aidex_links (device_id, env, status, state, created_at, updated_at)
+     VALUES (?, ?, 'pending', ?, ?, ?)
+     ON CONFLICT(device_id) DO UPDATE SET env = excluded.env, status = 'pending', state = excluded.state, updated_at = excluded.updated_at`,
+  ).bind(id, env, state, now, now).run();
+  return c.json({ authorize_url: aidex.authorizeUrl(c.env, env, state), env });
+});
+
+/**
+ * Callback do OAuth (público: é o redirect do navegador do paciente após autorizar).
+ * Validado pelo `state`. Registre este endpoint como redirect_uri no Console da AiDEX.
+ */
+api.get("/v1/aidex/callback", async (c) => {
+  const { code, state, error } = c.req.query();
+  const page = (msg: string) => c.html(`<!doctype html><meta charset=utf-8><title>BIOSENSE · AiDEX</title><body style="font-family:system-ui;padding:2rem;max-width:30rem;margin:auto"><h2>BIOSENSE × AiDEX</h2><p>${msg}</p></body>`);
+  if (!state) return page("Requisição inválida: faltou o parâmetro <code>state</code>.");
+  const row = await c.env.DB.prepare("SELECT device_id, env FROM aidex_links WHERE state = ?").bind(state).first<{ device_id: string; env: AidexEnv }>();
+  if (!row) return page("Autorização não reconhecida (state expirado ou já usado).");
+  if (error) {
+    await c.env.DB.prepare("UPDATE aidex_links SET status='error', last_error=?, state=NULL, updated_at=? WHERE device_id=?")
+      .bind(`authorize: ${error}`, Date.now(), row.device_id).run();
+    return page(`A autorização foi negada ou falhou (<code>${error}</code>). Você pode fechar esta janela.`);
+  }
+  if (!code) return page("Requisição inválida: faltou o parâmetro <code>code</code>.");
+  try {
+    await aidex.exchangeCode(c.env, row.device_id, row.env, code);
+    await c.env.DB.prepare("UPDATE aidex_links SET state=NULL, updated_at=? WHERE device_id=?").bind(Date.now(), row.device_id).run();
+    const link2 = (await aidex.getLink(c.env, row.device_id))!;
+    c.executionCtx.waitUntil(aidex.pollDevice(c.env, link2).catch(() => {}));
+    return page("Conta AiDEX conectada com sucesso. A coleta de glicemia começou. Você pode fechar esta janela.");
+  } catch (e) {
+    await c.env.DB.prepare("UPDATE aidex_links SET status='error', last_error=?, updated_at=? WHERE device_id=?")
+      .bind(e instanceof Error ? e.message : String(e), Date.now(), row.device_id).run();
+    return page("Não foi possível concluir a conexão. Tente novamente mais tarde.");
+  }
+});
+
+/** Dispara uma coleta imediata (além do cron). */
+api.post("/v1/devices/:id/aidex/poll", deviceRoute("manage"), async (c) => {
+  const link = await aidex.getLink(c.env, c.req.param("id")!);
+  if (!link || link.status === "pending") return c.json({ error: "not_linked", message: "Pulseira sem vínculo AiDEX ativo." }, 409);
+  try {
+    const r = await aidex.pollDevice(c.env, link);
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json({ error: "poll_failed", message: e instanceof Error ? e.message : String(e) }, 502);
+  }
+});
+
+/** Desfaz o vínculo localmente. (A revogação definitiva é feita pelo paciente no app AiDEX.) */
+api.delete("/v1/devices/:id/aidex", deviceRoute("manage"), async (c) => {
+  await c.env.DB.prepare("DELETE FROM aidex_links WHERE device_id = ?").bind(c.req.param("id")!).run();
+  return c.body(null, 204);
+});
+
+api.get("/v1/devices/:id/glucose", deviceRoute("read"), async (c) => {
+  const r = range(c);
+  if (isResponse(r)) return r;
+  const id = c.req.param("id")!;
+  const bucket = c.req.query("bucket");
+  if (bucket) {
+    const size = BUCKETS[bucket];
+    if (!size) return c.json({ error: "bad_request", message: `bucket deve ser um de: ${Object.keys(BUCKETS).join(", ")}` }, 400);
+    const { results } = await c.env.DB.prepare(
+      `SELECT (ts / ${size}) * ${size} AS ts, ROUND(AVG(mmol), 2) AS avg, ROUND(MIN(mmol), 2) AS min, ROUND(MAX(mmol), 2) AS max, COUNT(*) AS samples
+       FROM glucose WHERE device_id = ? AND ts BETWEEN ? AND ? GROUP BY ts / ${size} ORDER BY ts ${r.order} LIMIT ?`,
+    ).bind(id, r.from, r.to, r.limit).all();
+    return series(c, results as Record<string, unknown>[], r, { bucket, unit: "mmol/L" });
+  }
+  const { results } = await c.env.DB.prepare("SELECT ts, mmol, warning FROM glucose WHERE device_id = ? AND ts BETWEEN ? AND ? ORDER BY ts " + r.order + " LIMIT ?")
+    .bind(id, r.from, r.to, r.limit).all();
+  return series(c, results as Record<string, unknown>[], r, { unit: "mmol/L" });
+});
+
+api.get("/v1/devices/:id/glucose/summary", deviceRoute("read"), async (c) => {
+  const r = range(c, 14 * 86400_000); // janela padrão de 14 dias (padrão clínico de relatório CGM)
+  if (isResponse(r)) return r;
+  const { results } = await c.env.DB.prepare("SELECT ts, mmol FROM glucose WHERE device_id = ? AND ts BETWEEN ? AND ? ORDER BY ts ASC")
+    .bind(c.req.param("id")!, r.from, r.to).all<{ ts: number; mmol: number }>();
+  return c.json({ window_from: r.from, window_to: r.to, unit: "mmol/L", ...aidex.summarize(results) });
+});
+
+api.get("/v1/devices/:id/glucose/events", deviceRoute("read"), async (c) => {
+  const r = range(c, 7 * 86400_000);
+  if (isResponse(r)) return r;
+  const type = c.req.query("type");
+  const base = "SELECT type, ext_id, ts, payload FROM glucose_events WHERE device_id = ? AND ts BETWEEN ? AND ?";
+  const q = type ? base + " AND type = ? ORDER BY ts " + r.order + " LIMIT ?" : base + " ORDER BY ts " + r.order + " LIMIT ?";
+  const binds = type ? [c.req.param("id")!, r.from, r.to, type, r.limit] : [c.req.param("id")!, r.from, r.to, r.limit];
+  const { results } = await c.env.DB.prepare(q).bind(...binds).all<Record<string, unknown>>();
+  return c.json({ data: results.map((e) => ({ ...e, payload: parseJson(e.payload as string, {}) })), count: results.length });
 });
 
 // ====================================================================== comandos

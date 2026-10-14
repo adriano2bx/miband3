@@ -10,6 +10,12 @@ export interface Env {
   RETENTION_DAYS?: string;
   /** JSON opcional que sobrescreve o mapa de categorias de sono (ver sleep.ts). */
   SLEEP_KIND_MAP?: string;
+  /** Módulo AiDEX (glicemia). AIDEX_CLIENT_SECRET é segredo (wrangler secret put). */
+  AIDEX_ENV?: string; // "sandbox" (padrão) | "production"
+  AIDEX_CLIENT_ID?: string;
+  AIDEX_CLIENT_SECRET?: string;
+  /** Limite do backfill inicial de glicemia, em dias (padrão 90). */
+  AIDEX_BACKFILL_DAYS?: string;
 }
 
 export type Scope = "read" | "command" | "manage" | "admin";

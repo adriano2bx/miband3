@@ -69,6 +69,20 @@ jobs:
           echo "Serviço publicado em $url" >> "$GITHUB_STEP_SUMMARY"
       - name: Chave mestra
         run: printf '%s' "$ADMIN_API_KEY" | npx wrangler secret put ADMIN_API_KEY
+      - name: Segredos AiDEX (glicemia)
+        # Opcionais: sem eles, o módulo AiDEX fica inativo (connect responde 503) e
+        # o restante do serviço segue normal. Cadastre em Settings → Secrets → Actions.
+        env:
+          AIDEX_CLIENT_ID: ${{ secrets.AIDEX_CLIENT_ID }}
+          AIDEX_CLIENT_SECRET: ${{ secrets.AIDEX_CLIENT_SECRET }}
+        run: |
+          if [ -n "$AIDEX_CLIENT_ID" ] && [ -n "$AIDEX_CLIENT_SECRET" ]; then
+            printf '%s' "$AIDEX_CLIENT_ID"     | npx wrangler secret put AIDEX_CLIENT_ID
+            printf '%s' "$AIDEX_CLIENT_SECRET" | npx wrangler secret put AIDEX_CLIENT_SECRET
+            echo "Segredos AiDEX publicados." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::AIDEX_CLIENT_ID/AIDEX_CLIENT_SECRET não configurados; módulo AiDEX ficará inativo."
+          fi
       - name: Verificar serviço e escolher o endereço do app
         id: verify
         run: |

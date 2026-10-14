@@ -63,6 +63,18 @@ const routes: Record<string, Record<string, Op>> = {
   "/v1/devices/{id}/sleep": { get: { summary: "Sessões de sono (classificação provisória)", tag: "Histórico", auth: "read", params: ["from", "to"], res: "SleepResult" } },
   "/v1/devices/{id}/summary": { get: { summary: "Resumo do período", tag: "Histórico", auth: "read", params: ["from", "to"], res: "Summary" } },
 
+  // ------------------------------------------------------------------ glicemia (AiDEX)
+  "/v1/devices/{id}/aidex": {
+    get: { summary: "Estado do vínculo AiDEX", description: "Nunca expõe tokens. `status`: unlinked | pending | linked | revoked | error.", tag: "Glicemia (AiDEX)", auth: "read", res: "AidexStatus" },
+    delete: { summary: "Desfazer o vínculo localmente", description: "A revogação definitiva é feita pelo paciente no app AiDEX.", tag: "Glicemia (AiDEX)", auth: "manage" },
+  },
+  "/v1/devices/{id}/aidex/connect": { post: { summary: "Iniciar autorização AiDEX", description: "Devolve `authorize_url`: o paciente abre, faz login na AiDEX e autoriza o acesso somente-leitura.", tag: "Glicemia (AiDEX)", auth: "manage", body: "AidexConnectInput", res: "AidexConnect" } },
+  "/v1/aidex/callback": { get: { summary: "Callback OAuth (redirect do paciente)", description: "Público, validado pelo `state`. Registre esta URL como redirect_uri no Console da AiDEX. Responde HTML.", tag: "Glicemia (AiDEX)", auth: "public" } },
+  "/v1/devices/{id}/aidex/poll": { post: { summary: "Coletar glicemia agora", tag: "Glicemia (AiDEX)", auth: "manage", res: "AidexPoll", status: 202 } },
+  "/v1/devices/{id}/glucose": { get: { summary: "Glicemia do sensor (mmol/L)", description: "Leituras brutas, ou agregadas com `bucket` (média, mínimo e máximo por intervalo).", tag: "Glicemia (AiDEX)", auth: "read", params: [...series, "bucket", "format"], res: "Glucose[]", csv: true } },
+  "/v1/devices/{id}/glucose/summary": { get: { summary: "Métricas de CGM (TIR, média, GMI, CV)", description: "Janela padrão de 14 dias. Faixas de tempo-no-alvo em mmol/L: <3,0 / 3,0–3,9 / 3,9–10,0 / 10,0–13,9 / >13,9.", tag: "Glicemia (AiDEX)", auth: "read", params: ["from", "to"], res: "GlucoseSummary" } },
+  "/v1/devices/{id}/glucose/events": { get: { summary: "Eventos (refeição, exercício, medicação, insulina, outros)", tag: "Glicemia (AiDEX)", auth: "read", params: [...series, "type"], res: "GlucoseEvent[]" } },
+
   // ------------------------------------------------------------------ comandos
   "/v1/devices/{id}/commands": {
     get: { summary: "Comandos enviados", tag: "Comandos", auth: "read", params: [...series, "status"], res: "Command[]" },
@@ -330,6 +342,20 @@ const schemas: Record<string, unknown> = {
   PanelSession: obj({ session_token: { type: "string", example: "mbp_…" }, expires_at: T.ts, idle_timeout_s: T.int, technician: obj({ name: T.str }), scopes: { type: "array", items: T.str } }),
   TechInstallation: { allOf: [ref("Installation"), obj({ name: T.str, technician: T.str, scopes: { type: "array", items: T.str }, session_expires_at: T.ts })] },
   TechPing: obj({ ok: T.bool, server_time: T.ts, device_online: T.bool }),
+  AidexStatus: obj({ status: { type: "string", enum: ["unlinked", "pending", "linked", "revoked", "error"] }, env: { type: "string", enum: ["sandbox", "production"] }, cursor_at: T.tsNull, last_poll_at: T.tsNull, last_error: T.strNull, updated_at: T.ts }),
+  AidexConnectInput: obj({ env: { type: "string", enum: ["sandbox", "production"], description: "Padrão: AIDEX_ENV do Worker." } }),
+  AidexConnect: obj({ authorize_url: { type: "string", format: "uri", description: "Abra para o paciente autorizar na AiDEX." }, env: T.str }),
+  AidexPoll: obj({ ok: T.bool, inserted: { type: "integer", description: "Leituras novas gravadas." }, windows: { type: "integer", description: "Janelas de 30 dias consultadas." } }),
+  Glucose: obj({ ts: T.ts, mmol: { type: "number", example: 6.1 }, warning: { type: "string", nullable: true, enum: ["high glucose alert", "low glucose alert", "urgent low glucose alert", null] }, avg: { type: "number", description: "Só com bucket" }, min: T.num, max: T.num, samples: T.int }),
+  GlucoseSummary: obj({
+    window_from: T.ts, window_to: T.ts, unit: { type: "string", example: "mmol/L" }, samples: T.int, from: T.tsNull, to: T.tsNull,
+    mean_mmol: { type: "number", nullable: true }, mean_mgdl: { type: "number", nullable: true },
+    gmi_percent: { type: "number", nullable: true, description: "Glucose Management Indicator (%)." },
+    cv_percent: { type: "number", nullable: true, description: "Coeficiente de variação (%)." },
+    min_mmol: { type: "number", nullable: true }, max_mmol: { type: "number", nullable: true },
+    tir: obj({ very_low: T.num, low: T.num, in_range: T.num, high: T.num, very_high: T.num }),
+  }),
+  GlucoseEvent: obj({ type: { type: "string", enum: ["diet", "exercise", "medication", "insulin", "other"] }, ext_id: T.str, ts: T.ts, payload: T.obj }),
   Deleted: obj({ deleted: T.str }),
   Revoked: obj({ revoked: T.str }),
   Disabled: obj({ disabled: T.str }),
