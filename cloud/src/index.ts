@@ -8,8 +8,14 @@ import { pollAll } from "./aidex";
 export { DeviceHub } from "./hub";
 export { Fleet } from "./fleet";
 
-/** Poda os dados antigos conforme RETENTION_DAYS. */
+/** Poda os dados antigos conforme RETENTION_DAYS e as sessões expiradas. */
 async function cleanup(env: Env): Promise<void> {
+  const now = Date.now();
+  // Sessões de técnico/painel totalmente expiradas (independe de RETENTION_DAYS).
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM tech_sessions WHERE max_expires_at < ?").bind(now),
+    env.DB.prepare("DELETE FROM panel_sessions WHERE max_expires_at < ?").bind(now),
+  ]);
   const days = Number(env.RETENTION_DAYS ?? 365);
   if (!days || days < 0) return;
   const cutoff = Date.now() - days * 86400_000;

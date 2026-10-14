@@ -1,4 +1,7 @@
 import type { Env } from "./types";
+import { compare, describeRule, type AlertRule } from "./alerts";
+import { deliverWebhooks } from "./webhooks";
+import { newId } from "./util";
 
 /**
  * Integração somente-leitura com a AiDEX API Open Platform (OAuth 2.0).
@@ -211,6 +214,10 @@ export async function pollDevice(env: Env, link: AidexLink): Promise<{ inserted:
   await env.DB.prepare("UPDATE aidex_links SET cursor_at = ?, last_poll_at = ?, status = 'linked', updated_at = ? WHERE device_id = ?")
     .bind(now, now, now, link.device_id)
     .run();
+  // Alertas de glicemia (hipo/hiper) sobre a leitura mais recente; não aborta a coleta se falhar.
+  if (inserted > 0) {
+    try { await evaluateGlucoseAlerts(env, link.device_id); } catch (e) { console.error("glucose alerts", e); }
+  }
   return { inserted, windows };
 }
 
@@ -239,6 +246,35 @@ export async function pollAll(env: Env): Promise<void> {
       await setError(env, link.device_id, link.status === "revoked" ? "revoked" : "error", e instanceof Error ? e.message : String(e));
     }
   }
+}
+
+// ------------------------------------------------------------------ alertas de glicemia
+
+/**
+ * Avalia as regras de alerta de glicemia (metric='glucose') sobre a ÚLTIMA leitura
+ * do sensor e registra alertas de hipo/hiper. O cooldown é garantido pela própria
+ * tabela de alertas (não refaz o mesmo alerta dentro de cooldown_s). Roda na coleta
+ * porque a glicemia não passa pelo Durable Object das pulseiras.
+ */
+export async function evaluateGlucoseAlerts(env: Env, deviceId: string): Promise<number> {
+  const latest = await env.DB.prepare("SELECT ts, mmol FROM glucose WHERE device_id = ? ORDER BY ts DESC LIMIT 1").bind(deviceId).first<{ ts: number; mmol: number }>();
+  if (!latest) return 0;
+  const { results: rules } = await env.DB.prepare(
+    "SELECT * FROM alert_rules WHERE enabled = 1 AND metric = 'glucose' AND threshold IS NOT NULL AND (device_id IS NULL OR device_id = ?)",
+  ).bind(deviceId).all<AlertRule>();
+  let fired = 0;
+  for (const rule of rules) {
+    if (!compare(rule.op, latest.mmol, rule.threshold!)) continue;
+    const last = await env.DB.prepare("SELECT MAX(ts) AS ts FROM alerts WHERE rule_id = ? AND device_id = ?").bind(rule.id, deviceId).first<{ ts: number | null }>();
+    if (last?.ts != null && latest.ts - last.ts < rule.cooldown_s * 1000) continue;
+    const id = newId("alt");
+    const message = describeRule(rule, latest.mmol);
+    await env.DB.prepare("INSERT INTO alerts (id, device_id, rule_id, ts, metric, value, severity, message) VALUES (?,?,?,?,?,?,?,?)")
+      .bind(id, deviceId, rule.id, latest.ts, "glucose", latest.mmol, rule.severity, message).run();
+    await deliverWebhooks(env, "alert.created", deviceId, { id, device_id: deviceId, rule_id: rule.id, ts: latest.ts, metric: "glucose", value: latest.mmol, severity: rule.severity, message, rule_name: rule.name }).catch(() => {});
+    fired++;
+  }
+  return fired;
 }
 
 // ------------------------------------------------------------------ análise

@@ -1,5 +1,5 @@
 export type AlertOp = "gt" | "gte" | "lt" | "lte" | "eq";
-export type AlertMetric = "heart_rate" | "battery" | "offline" | "event";
+export type AlertMetric = "heart_rate" | "battery" | "offline" | "event" | "glucose";
 
 export interface AlertRule {
   id: string;
@@ -57,5 +57,7 @@ export function describeRule(rule: AlertRule, value: number | string | null): st
       return `Pulseira offline há ${value}s (limite ${rule.threshold}s)`;
     case "event":
       return `Evento '${rule.match}' registrado pela pulseira`;
+    case "glucose":
+      return `Glicemia ${value} mmol/L (${ops[rule.op]} ${rule.threshold} mmol/L)`;
   }
 }

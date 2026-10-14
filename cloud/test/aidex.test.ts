@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:test";
 import { call, newDevice } from "./helpers";
-import { parseApiTime, summarize, toApiTime, mmolToMgdl, authorizeUrl } from "../src/aidex";
+import { parseApiTime, summarize, toApiTime, mmolToMgdl, authorizeUrl, evaluateGlucoseAlerts } from "../src/aidex";
 
 describe("aidex — lógica pura", () => {
   it("toApiTime/parseApiTime fazem round-trip em UTC", () => {
@@ -115,6 +115,25 @@ describe("aidex — rotas", () => {
       const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE device_id = ?`).bind(d.id).first<{ n: number }>();
       expect(row!.n).toBe(0);
     }
+  });
+
+  it("alerta de glicemia (hipo) dispara na coleta e respeita o cooldown", async () => {
+    const d = await newDevice("CGM alerta");
+    await env.DB.prepare(
+      "INSERT INTO alert_rules (id, device_id, name, metric, op, threshold, duration_s, cooldown_s, severity, action, enabled, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    ).bind("rul_glu_" + d.id, d.id, "Hipoglicemia", "glucose", "lt", 3.9, 0, 1800, "critical", "{}", 1, Date.now()).run();
+
+    const t0 = Date.now();
+    await env.DB.prepare("INSERT INTO glucose (device_id, ts, mmol, warning) VALUES (?,?,?,?)").bind(d.id, t0, 3.2, "low").run();
+    expect(await evaluateGlucoseAlerts(env, d.id)).toBe(1);
+
+    // Nova leitura baixa dentro do cooldown: não refaz.
+    await env.DB.prepare("INSERT INTO glucose (device_id, ts, mmol, warning) VALUES (?,?,?,?)").bind(d.id, t0 + 60_000, 3.0, "low").run();
+    expect(await evaluateGlucoseAlerts(env, d.id)).toBe(0);
+
+    const alerts = await call("GET", `/v1/alerts?device_id=${d.id}&from=0&to=99999999999999`);
+    expect(alerts.json.data.length).toBe(1);
+    expect(alerts.json.data[0].metric).toBe("glucose");
   });
 
   it("glucose agrega por bucket", async () => {

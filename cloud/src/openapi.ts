@@ -289,7 +289,7 @@ const alertRuleInput = obj(
   {
     device_id: { type: "string", nullable: true, description: "null = todas as instalações." },
     name: { type: "string", example: "Taquicardia" },
-    metric: { type: "string", enum: ["heart_rate", "battery", "offline", "event"] },
+    metric: { type: "string", enum: ["heart_rate", "battery", "offline", "event", "glucose"] },
     op: { type: "string", enum: ["gt", "gte", "lt", "lte", "eq"], default: "gt" },
     threshold: { type: "number", nullable: true, description: "Obrigatório exceto para metric=event. Para offline, em segundos." },
     match: { type: "string", nullable: true, description: "Tipo do evento quando metric=event (ex.: START_NONWEAR)." },

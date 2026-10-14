@@ -623,6 +623,7 @@ api.post("/v1/devices/:id/aidex/connect", deviceRoute("manage"), async (c) => {
  */
 api.get("/v1/aidex/callback", async (c) => {
   const { code, state, error } = c.req.query();
+  const esc = (s: string) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch] as string));
   const page = (msg: string) => c.html(`<!doctype html><meta charset=utf-8><title>BIOSENSE · AiDEX</title><body style="font-family:system-ui;padding:2rem;max-width:30rem;margin:auto"><h2>BIOSENSE × AiDEX</h2><p>${msg}</p></body>`);
   if (!state) return page("Requisição inválida: faltou o parâmetro <code>state</code>.");
   const row = await c.env.DB.prepare("SELECT device_id, env FROM aidex_links WHERE state = ?").bind(state).first<{ device_id: string; env: AidexEnv }>();
@@ -630,7 +631,7 @@ api.get("/v1/aidex/callback", async (c) => {
   if (error) {
     await c.env.DB.prepare("UPDATE aidex_links SET status='error', last_error=?, state=NULL, updated_at=? WHERE device_id=?")
       .bind(`authorize: ${error}`, Date.now(), row.device_id).run();
-    return page(`A autorização foi negada ou falhou (<code>${error}</code>). Você pode fechar esta janela.`);
+    return page(`A autorização foi negada ou falhou (<code>${esc(error)}</code>). Você pode fechar esta janela.`);
   }
   if (!code) return page("Requisição inválida: faltou o parâmetro <code>code</code>.");
   try {
@@ -749,7 +750,7 @@ api.delete("/v1/devices/:id/commands/:cid", deviceRoute("command"), async (c) =>
 const RuleInput = z.object({
   device_id: z.string().nullish(),
   name: z.string().min(1).max(120),
-  metric: z.enum(["heart_rate", "battery", "offline", "event"]),
+  metric: z.enum(["heart_rate", "battery", "offline", "event", "glucose"]),
   op: z.enum(["gt", "gte", "lt", "lte", "eq"]).default("gt"),
   threshold: z.number().nullish(),
   match: z.string().max(64).nullish(),
