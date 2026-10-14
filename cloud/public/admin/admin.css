@@ -266,3 +266,24 @@
 .chart-tip.hidden { display: none; }
 .chart-cross { stroke: var(--text-2); stroke-width: 1; stroke-dasharray: 3 3; opacity: .45; }
 .chart-marker { fill: #fff; stroke: var(--primary); stroke-width: 2.5; }
+/* ---- alertas na aba Voluntários ---- */
+.patient-alerts { display: grid; gap: 6px; margin-bottom: 14px; }
+.patient-alerts:empty { display: none; }
+.alerts-head { display: flex; align-items: center; gap: 8px; }
+.alert-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--outline); border-left: 3px solid var(--text-2); border-radius: 8px; background: var(--surface); }
+.alert-row .alert-body { flex: 1; min-width: 0; }
+.alert-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-2); flex: none; }
+.alert-row.sev-critical { border-left-color: var(--error); }
+.alert-row.sev-critical .alert-dot { background: var(--error); }
+.alert-row.sev-warning { border-left-color: var(--warning); }
+.alert-row.sev-warning .alert-dot { background: var(--warning); }
+.alert-row.sev-info { border-left-color: var(--primary); }
+.alert-row.sev-info .alert-dot { background: var(--primary); }
+.alert-row .btn { min-height: 34px; padding: 6px 12px; font-size: 12px; flex: none; }
+/* ---- editor de regras de glicemia ---- */
+.glu-rules { display: grid; gap: 6px; }
+.glu-rule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.glu-rule-name { flex: 1; min-width: 120px; color: var(--text); }
+.glu-rule input[type="checkbox"] { width: auto; min-height: auto; }
+.glu-thr { width: 84px; min-height: 34px; padding: 4px 8px; }
+.glu-rule .btn { min-height: 34px; padding: 5px 10px; font-size: 12px; }

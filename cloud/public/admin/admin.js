@@ -660,6 +660,14 @@ const REC_STREAMS = {
   events: { label: "Eventos", dev: "band", cols: ["Quando", "Tipo", "Detalhes"], row: (r) => [fmt(r.ts), eventTypeLabel(r.type), eventDetails(r.data)], paged: true, filter: (r) => !isBatteryEvent(r.type) },
 };
 let recBand = null, recCgm = null, recStream = "", recCursorTo = null, recAll = [], recReq = 0;
+let patDeviceIds = [];
+// Auto-atualização dos alertas (leve, não reseta a lista de registros) a cada 60 s.
+setInterval(() => {
+  const panel = document.querySelector('[data-panel="patients"]');
+  if (apiKey && panel && !panel.classList.contains("hidden") && selectedPatientId && patDeviceIds.length) {
+    renderPatientAlerts(patDeviceIds);
+  }
+}, 60_000);
 
 function setupRecords(band, cgm) {
   recBand = band; recCgm = cgm;
@@ -711,9 +719,10 @@ function setPatientEmpty(msg) {
   $("#kGluNowAt").textContent = "sem leituras"; $("#kGluMean").textContent = "glicose média —"; $("#kHrRange").textContent = "sem amostras";
   $("#tirBar").replaceChildren(); $("#tirLegend").replaceChildren();
   $("#gluEventRows").replaceChildren(); $("#gluEventsEmpty").classList.remove("hidden");
-  $("#aidexStatus").textContent = "—"; $("#aidexActions").replaceChildren();
+  $("#aidexStatus").textContent = "—"; $("#aidexActions").replaceChildren(); $("#gluRules").replaceChildren();
   $("#recHead").replaceChildren(); $("#recRows").replaceChildren(); $("#recMore").classList.add("hidden");
   $("#recCount").textContent = ""; $("#recEmpty").textContent = msg || "Sem registros."; $("#recEmpty").classList.remove("hidden");
+  $("#patAlerts").replaceChildren();
 }
 
 async function loadPatients() {
@@ -762,6 +771,24 @@ function renderPatientHeader(detail, band, cgm, patient) {
     el("div", { class: "patient-id" }, el("h2", {}, detail.name), el("span", { class: "mono" }, idLabel)),
     el("div", { class: "dev-chips" }, ...chips),
   );
+}
+
+async function renderPatientAlerts(deviceIds) {
+  const box = $("#patAlerts");
+  box.replaceChildren();
+  if (!deviceIds.length) return;
+  try {
+    const { data } = await api("GET", "/v1/alerts?acked=false&order=desc&limit=100");
+    const mine = (data || []).filter((a) => deviceIds.includes(a.device_id));
+    if (!mine.length) return;
+    box.replaceChildren(
+      el("div", { class: "alerts-head" }, el("span", { class: "eyebrow" }, "Alertas não reconhecidos"), el("span", { class: "pill revoked" }, String(mine.length))),
+      ...mine.slice(0, 8).map((a) => el("div", { class: `alert-row sev-${a.severity}` },
+        el("span", { class: "alert-dot", "aria-hidden": "true" }),
+        el("div", { class: "alert-body" }, el("div", {}, a.message), el("div", { class: "muted" }, fmt(a.ts))),
+        el("button", { class: "btn secondary", onclick: guard(async () => { await api("POST", `/v1/alerts/${encodeURIComponent(a.id)}/ack`); loadPatientData(); }) }, "Reconhecer"))),
+    );
+  } catch (e) { if (e.message !== "unauthorized") box.replaceChildren(); }
 }
 
 function renderTir(s) {
@@ -829,6 +856,36 @@ function attachHover(box, svg, pts, fmtPoint) {
   };
   box.addEventListener("pointermove", move);
   box.addEventListener("pointerleave", () => { tip.classList.add("hidden"); cross.style.display = "none"; marker.style.display = "none"; });
+}
+
+async function renderGluRules(cgm) {
+  const box = $("#gluRules");
+  box.replaceChildren();
+  if (!cgm) return;
+  try {
+    const { data } = await api("GET", `/v1/alert-rules?device_id=${encodeURIComponent(cgm.id)}`);
+    const rules = (data || []).filter((r) => r.metric === "glucose");
+    const opLabel = { lt: "<", lte: "≤", gt: ">", gte: "≥", eq: "=" };
+    box.append(el("p", { class: "eyebrow", style: "margin:12px 0 4px" }, "Alertas de glicemia (mmol/L)"));
+    if (!rules.length) { box.append(el("p", { class: "muted" }, "Sem regras — as padrões são criadas ao conectar o sensor.")); return; }
+    rules.forEach((r) => {
+      const enabled = el("input", { type: "checkbox", title: "Ativa" });
+      enabled.checked = Boolean(r.enabled);
+      const thr = el("input", { type: "number", step: "0.1", class: "glu-thr", value: String(r.threshold) });
+      const row = el("div", { class: "glu-rule" },
+        enabled,
+        el("span", { class: "glu-rule-name" }, `${r.name.replace(/\s*\([^)]*\)\s*$/, "")} ${opLabel[r.op] || r.op}`),
+        thr);
+      if (isManager) {
+        row.append(el("button", { class: "btn secondary", onclick: guard(async () => {
+          await api("PATCH", `/v1/alert-rules/${encodeURIComponent(r.id)}`, { threshold: Number(thr.value), enabled: enabled.checked });
+          flash("Regra atualizada.");
+          renderGluRules(cgm);
+        }) }, "Salvar"));
+      } else { enabled.disabled = true; thr.disabled = true; }
+      box.append(row);
+    });
+  } catch (e) { if (e.message !== "unauthorized") box.replaceChildren(); }
 }
 
 function drawGlucoseChart(box, rows) {
@@ -926,6 +983,8 @@ async function loadPatientData() {
     const band = detail.devices.find((d) => d.type === "miband");
     const cgm = detail.devices.find((d) => d.type === "cgm");
     renderPatientHeader(detail, band, cgm, patient);
+    patDeviceIds = [band, cgm].filter(Boolean).map((d) => d.id);
+    renderPatientAlerts(patDeviceIds);
 
     const exp = $("#patExport"); exp.replaceChildren();
     if (band) {
@@ -971,6 +1030,7 @@ async function loadPatientData() {
     renderTir(s);
     renderGlucoseEvents((r.gev && r.gev.data) || []);
     renderAidex(cgm, r.aidex);
+    renderGluRules(cgm);
 
     drawPatientHr($("#patHrChart"), (r.hr && r.hr.data) || [], !!band);
     const h = (r.hrsum && r.hrsum.heart_rate) || {};

@@ -845,7 +845,8 @@ api.get("/v1/alerts", requireAuth("read"), async (c) => {
   return series(c, results as Record<string, unknown>[], r);
 });
 
-api.post("/v1/alerts/:aid/ack", requireAuth("command"), async (c) => {
+// Reconhecer alerta exige apenas acesso de leitura ao device (o seguidor acompanha e reconhece).
+api.post("/v1/alerts/:aid/ack", requireAuth("read"), async (c) => {
   const aid = c.req.param("aid")!;
   const row = await c.env.DB.prepare("SELECT device_id FROM alerts WHERE id = ?").bind(aid).first<{ device_id: string }>();
   if (!row) return c.json({ error: "not_found" }, 404);
