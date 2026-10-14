@@ -19,6 +19,17 @@ function el(tag, attrs = {}, ...children) {
 }
 const fmt = (ms) => (ms ? new Date(ms).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—");
 
+// Detalhes de evento legíveis (sem JSON cru): usa "description" quando houver, senão pares chave: valor.
+function eventDetails(data) {
+  if (data == null) return "—";
+  if (typeof data !== "object") return String(data);
+  if (data.description != null) return String(data.description);
+  const parts = Object.entries(data).map(([k, v]) => `${k}: ${v && typeof v === "object" ? JSON.stringify(v) : v}`);
+  return parts.length ? parts.join(" · ") : "—";
+}
+const EVENT_LABELS = { FELL_ASLEEP: "Adormeceu", WOKE_UP: "Acordou", DEEP_SLEEP: "Sono profundo", LIGHT_SLEEP: "Sono leve", AWAKE: "Acordado", STEP_GOAL: "Meta de passos", LOW_BATTERY: "Bateria baixa", CHARGING: "Carregando", FULLY_CHARGED: "Carga completa" };
+function eventTypeLabel(t) { return EVENT_LABELS[t] || String(t).replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase()); }
+
 async function api(method, path, body) {
   const res = await fetch(path, {
     method,
@@ -513,8 +524,8 @@ async function loadMonitorData() {
       el("td", {}, fmt(row.start)), el("td", {}, durationLabel(row.duration_min)), el("td", {}, `${row.deep_min} min`), el("td", {}, `${row.light_min} min`), el("td", {}, row.avg_hr == null ? "—" : `${row.avg_hr} bpm`))));
     $("#sleepEmpty").classList.toggle("hidden", Boolean(sleep.count));
     $("#eventRows").replaceChildren(...(events.data || []).map((row) => {
-      const details = row.data == null ? "—" : JSON.stringify(row.data);
-      return el("tr", {}, el("td", {}, fmt(row.ts)), el("td", {}, row.type), el("td", {}, details.length > 100 ? `${details.slice(0, 100)}…` : details));
+      const details = eventDetails(row.data);
+      return el("tr", {}, el("td", {}, fmt(row.ts)), el("td", {}, eventTypeLabel(row.type)), el("td", {}, details.length > 120 ? `${details.slice(0, 120)}…` : details));
     }));
     $("#eventsEmpty").classList.toggle("hidden", Boolean(events.count));
     $("#monitorUpdatedAt").textContent = `Atualizado às ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
@@ -649,7 +660,7 @@ async function loadPatients() {
       $("#patUpdatedAt").textContent = "Sem voluntários";
       return setPatientEmpty("Nenhum voluntário cadastrado.");
     }
-    select.replaceChildren(...data.map((p) => el("option", { value: p.id }, `${p.name}${p.ref ? " · " + p.ref : ""}`)));
+    select.replaceChildren(...data.map((p) => el("option", { value: p.id }, `${shortId(p.id)} · ${p.name}`)));
     if (!data.some((p) => p.id === selectedPatientId)) selectedPatientId = data[0].id;
     select.value = selectedPatientId;
     select.disabled = false;
@@ -682,8 +693,8 @@ function renderTir(s) {
 function renderGlucoseEvents(rows) {
   $("#gluEventsEmpty").classList.toggle("hidden", rows.length > 0);
   $("#gluEventRows").replaceChildren(...rows.map((e) => {
-    const details = typeof e.payload === "object" ? JSON.stringify(e.payload) : String(e.payload ?? "");
-    return el("tr", {}, el("td", {}, dateLabel(e.ts)), el("td", {}, gluEventType[e.type] || e.type), el("td", {}, details.length > 80 ? details.slice(0, 80) + "…" : details));
+    const details = eventDetails(e.payload);
+    return el("tr", {}, el("td", {}, dateLabel(e.ts)), el("td", {}, gluEventType[e.type] || e.type), el("td", {}, details.length > 120 ? details.slice(0, 120) + "…" : details));
   }));
 }
 
