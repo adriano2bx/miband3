@@ -34,8 +34,10 @@
   // Painel de administração (public/admin). As rotas /v1/* sempre vão para o Worker.
   "assets": { "directory": "./public", "run_worker_first": ["/v1/*"] },
 
-  // "17 3 * * *" = limpeza diária (RETENTION_DAYS). "*/15 * * * *" = coleta da glicemia AiDEX.
-  "triggers": { "crons": ["17 3 * * *", "*/15 * * * *"] },
+  // Um único cron por causa do limite de 5 crons/conta do plano Free da Cloudflare.
+  // A cada 15 min dispara a coleta da glicemia AiDEX; a limpeza diária
+  // (RETENTION_DAYS) roda uma vez por dia na execução das 03h UTC (ver index.ts).
+  "triggers": { "crons": ["*/15 * * * *"] },
 
   "vars": {
     "RETENTION_DAYS": "365",
