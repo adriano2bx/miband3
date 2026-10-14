@@ -739,21 +739,27 @@ async function loadPatients() {
   }
 }
 
-function renderPatientHeader(detail, band, cgm) {
-  const chip = (label, on) => el("span", { class: `dev-chip ${on ? "on" : "off"}` }, el("span", { class: "dot " + (on ? "on" : ""), "aria-hidden": "true" }), label);
+function renderPatientHeader(detail, band, cgm, patient) {
   const chips = [];
   if (band) {
-    // Não afirmamos "conectado" (o socket pode ficar zumbi): mostramos a última leitura.
-    const recent = band.last_seen_at && (Date.now() - band.last_seen_at < ONLINE_FRESH_MS);
+    // "Última leitura" = último DADO recebido (não o last_seen, que conta pings/conexão).
+    const lastTs = patient && patient.last_hr_ts;
+    const recent = lastTs && (Date.now() - lastTs < ONLINE_FRESH_MS);
     chips.push(el("span", { class: `dev-chip ${recent ? "on" : "off"}` },
       el("span", { class: "dot " + (recent ? "on" : ""), "aria-hidden": "true" }),
-      `Pulseira · última leitura ${ago(band.last_seen_at)}`));
+      `Pulseira · última leitura ${lastTs ? fmt(lastTs) : "sem leituras"}`));
   }
-  // O sensor AiDEX é coletado por nuvem (não é "conexão ao vivo"): status real fica no bloco abaixo.
-  if (cgm) chips.push(chip("Sensor AiDEX", false));
+  if (cgm) {
+    const lastG = patient && patient.last_glucose_ts;
+    chips.push(el("span", { class: "dev-chip off" },
+      el("span", { class: "dot", "aria-hidden": "true" }),
+      `Sensor AiDEX${lastG ? " · última leitura " + fmt(lastG) : " · sem leituras"}`));
+  }
   if (!band && !cgm) chips.push(el("span", { class: "muted" }, "Sem dispositivos vinculados."));
+  // Evita repetir o nome quando ref == nome; mostra o id curto nesse caso.
+  const idLabel = detail.ref && detail.ref !== detail.name ? detail.ref : shortId(detail.id);
   $("#patHeader").replaceChildren(
-    el("div", { class: "patient-id" }, el("h2", {}, detail.name), detail.ref ? el("span", { class: "mono" }, detail.ref) : null),
+    el("div", { class: "patient-id" }, el("h2", {}, detail.name), el("span", { class: "mono" }, idLabel)),
     el("div", { class: "dev-chips" }, ...chips),
   );
 }
@@ -800,6 +806,31 @@ function renderAidex(cgm, status) {
   }
 }
 
+// Tooltip interativo: ao mover o mouse, marca o ponto mais próximo e mostra valor + horário.
+function attachHover(box, svg, pts, fmtPoint) {
+  if (!pts.length) return;
+  box.style.position = "relative";
+  const tip = el("div", { class: "chart-tip hidden" });
+  box.append(tip);
+  const cross = document.createElementNS(NS, "line"); cross.setAttribute("class", "chart-cross"); cross.setAttribute("y1", "20"); cross.setAttribute("y2", "190"); cross.style.display = "none"; svg.append(cross);
+  const marker = document.createElementNS(NS, "circle"); marker.setAttribute("class", "chart-marker"); marker.setAttribute("r", "4.5"); marker.style.display = "none"; svg.append(marker);
+  const move = (ev) => {
+    const rect = box.getBoundingClientRect();
+    const vx = ((ev.clientX - rect.left) / rect.width) * 800;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) { const dd = Math.abs(pts[i].x - vx); if (dd < bd) { bd = dd; best = i; } }
+    const p = pts[best];
+    cross.setAttribute("x1", p.x); cross.setAttribute("x2", p.x); cross.style.display = "";
+    marker.setAttribute("cx", p.x); marker.setAttribute("cy", p.y); marker.style.display = "";
+    tip.innerHTML = fmtPoint(p); tip.classList.remove("hidden");
+    const px = (p.x / 800) * rect.width;
+    tip.style.left = Math.min(Math.max(px - tip.offsetWidth / 2, 2), rect.width - tip.offsetWidth - 2) + "px";
+    tip.style.top = Math.max(2, (p.y / 210) * rect.height - tip.offsetHeight - 8) + "px";
+  };
+  box.addEventListener("pointermove", move);
+  box.addEventListener("pointerleave", () => { tip.classList.add("hidden"); cross.style.display = "none"; marker.style.display = "none"; });
+}
+
 function drawGlucoseChart(box, rows) {
   const points = rows.map((r) => ({ ts: Number(r.ts), value: Number(r.avg != null ? r.avg : r.mmol) })).filter((p) => Number.isFinite(p.value));
   if (!points.length) { box.replaceChildren(el("div", { class: "chart-empty" }, "Sem leituras de glicose neste período.")); return; }
@@ -812,8 +843,10 @@ function drawGlucoseChart(box, rows) {
   const xy = points.map((p, i) => [points.length === 1 ? 400 : 18 + i * 764 / (points.length - 1), y(p.value)]);
   const d = xy.map(([x, yy], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yy.toFixed(1)}`).join(" ");
   const path = document.createElementNS(NS, "path"); path.setAttribute("d", d); path.setAttribute("class", "glu-line"); svg.append(path);
-  xy.forEach(([x, yy], i) => { const c = document.createElementNS(NS, "circle"); c.setAttribute("cx", String(x)); c.setAttribute("cy", String(yy)); c.setAttribute("r", points.length > 48 ? "2" : "3.4"); const v = points[i].value; c.setAttribute("class", "glu-dot" + (v < 3.9 ? " lowdot" : v > 10 ? " highdot" : "")); c.setAttribute("aria-label", `${dateLabel(points[i].ts)}: ${v.toFixed(1)} mmol/L`); svg.append(c); });
+  xy.forEach(([x, yy], i) => { const c = document.createElementNS(NS, "circle"); c.setAttribute("cx", String(x)); c.setAttribute("cy", String(yy)); c.setAttribute("r", points.length > 48 ? "2" : "3.4"); const v = points[i].value; c.setAttribute("class", "glu-dot" + (v < 3.9 ? " lowdot" : v > 10 ? " highdot" : "")); svg.append(c); });
   box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${dataMin.toFixed(1).replace(".", ",")}–${dataMax.toFixed(1).replace(".", ",")} mmol/L`, dateLabel(points.at(-1).ts)));
+  const pts = points.map((p, i) => ({ ts: p.ts, value: p.value, x: xy[i][0], y: xy[i][1] }));
+  attachHover(box, svg, pts, (p) => `<b>${p.value.toFixed(1).replace(".", ",")} mmol/L</b><span>${fmt(p.ts)}</span>`);
 }
 
 function drawPatientHr(box, rows, hasBand) {
@@ -828,6 +861,8 @@ function drawPatientHr(box, rows, hasBand) {
   const area = document.createElementNS(NS, "path"); area.setAttribute("d", `${d} L${xy.at(-1)[0]},184 L${xy[0][0]},184 Z`); area.setAttribute("class", "chart-area"); svg.append(area);
   const line = document.createElementNS(NS, "path"); line.setAttribute("d", d); line.setAttribute("class", "chart-line"); svg.append(line);
   box.replaceChildren(svg, el("div", { class: "chart-labels" }, dateLabel(points[0].ts), `${Math.min(...points.map((p) => p.value))}–${Math.max(...points.map((p) => p.value))} bpm`, dateLabel(points.at(-1).ts)));
+  const pts = points.map((p, i) => ({ ts: p.ts, value: p.value, x: xy[i][0], y: xy[i][1] }));
+  attachHover(box, svg, pts, (p) => `<b>${p.value} bpm</b><span>${fmt(p.ts)}</span>`);
 }
 
 // Exportação CSV: pagina a série pelo cursor e monta o arquivo no cliente (histórico completo).
@@ -890,7 +925,7 @@ async function loadPatientData() {
     if (request !== patRequest || !apiKey) return;
     const band = detail.devices.find((d) => d.type === "miband");
     const cgm = detail.devices.find((d) => d.type === "cgm");
-    renderPatientHeader(detail, band, cgm);
+    renderPatientHeader(detail, band, cgm, patient);
 
     const exp = $("#patExport"); exp.replaceChildren();
     if (band) {
